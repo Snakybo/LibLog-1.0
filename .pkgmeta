@@ -1,0 +1,9 @@
+package-as: LibLog-1.0
+enable-nolib-creation: no
+
+ignore:
+  - .editorconfig
+  - CONTRIBUTING.md
+
+externals:
+  LibStub: https://repos.curseforge.com/wow/libstub/trunk

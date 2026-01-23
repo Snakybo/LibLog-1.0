@@ -1,0 +1,23 @@
+## Interface: 120000, 50503, 11508
+## Title: Lib: LibLog-1.0
+## Author: Snakybo
+## LoadOnDemand: 1
+## Notes: Allows addons to use a standardized, configurable logging framwork.
+## Version: @project-version@
+## Category-enUS: Libraries
+## Category-deDE: Bibliotheken
+## Category-esES: Bibliotecas
+## Category-esMX: Bibliotecas
+## Category-frFR: Bibliothèques
+## Category-itIT:
+## Category-koKR:
+## Category-ptBR: Bibliotecas
+## Category-ruRU: Библиотеки
+## Category-zhCN: 函数库
+## Category-zhTW: 函式庫
+## X-Website: https://github.com/Snakybo/LibLog-1.0
+## X-Github: https://github.com/Snakybo/LibLog-1.0
+
+Libs.xml
+
+LibLog-1.0\LibLog-1.0.xml

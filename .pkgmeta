@@ -4,6 +4,8 @@ enable-nolib-creation: no
 ignore:
   - .editorconfig
   - CONTRIBUTING.md
+  - README.md
+  - Assets
 
 externals:
   LibStub: https://repos.curseforge.com/wow/libstub/trunk

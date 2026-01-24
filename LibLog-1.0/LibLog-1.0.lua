@@ -34,7 +34,7 @@
 -- The arguments can be any number of values, they will be seperated using a whitespace. A value can be of any type, for example:
 --
 --   MyAddon:LogInfo("Received", true, false, nil, 1.356)
---   -- 7214.157 INF MyAddon: Received true false nil 1.356
+--   -- INF MyAddon: Received true false nil 1.356
 --
 -- You can manipulate the current log level using:
 --
@@ -110,7 +110,7 @@ if LibStub == nil then
 end
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 1)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 2)
 if LibLog == nil then
 	return
 end
@@ -289,18 +289,31 @@ end
 --- @param level LogLevel
 local function GetPrefix(self, level)
 	local addon = self.name or LibLog.UNKNOWN
+	local prefix
 
-	local prefix = {
-		"|c",
-		colors[level],
-		string.format("%.3f", GetTimePreciseSec()),
-		" ",
-		prefixes[level],
-		" ",
-		addon,
-		":",
-		"|r"
-	}
+	if level >= LibLog.LogLevel.DEBUG then
+		prefix = {
+			"|c",
+			colors[level],
+			string.format("%.3f", GetTimePreciseSec()),
+			" ",
+			prefixes[level],
+			" ",
+			addon,
+			":",
+			"|r"
+		}
+	else
+		prefix = {
+			"|c",
+			colors[level],
+			prefixes[level],
+			" ",
+			addon,
+			":",
+			"|r"
+		}
+	end
 
 	return table.concat(prefix, "")
 end

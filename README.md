@@ -5,7 +5,7 @@ box.
 
 ## Quick example
 
-![Log example](Assets/example.png)
+![Log example](.github/images/example.png)
 
 ```lua
 self:LogVerbose("A verbose message", 3.14, true)
@@ -61,9 +61,10 @@ By default, the minimum log level is set to `INF`.
 
 LibLog-1.0 automatically adds some helpful information to the log message. Each log is prefexed with:
 
-1. The current timestamp, including milliseconds.
-2. The severity level.
-3. The name of the calling addon.
+1. The severity level.
+2. The name of the calling addon.
+
+Additionally, messages with a DBG or VRB severity are also prefixed with the current timestamp, including milliseconds.
 
 ### Color coding
 

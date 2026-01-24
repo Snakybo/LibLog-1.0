@@ -179,5 +179,5 @@ end
 
 ## External integrations
 
-The [LogConfig](https://github.com/Snakybo/LogConfig) addon is an example of an external log level manager. It's able to manage both the global minimum logging
+The [LogManager](https://github.com/Snakybo/LogManager) addon is an example of an external log level manager. It's able to manage both the global minimum logging
 level, as well as per-addon settings.

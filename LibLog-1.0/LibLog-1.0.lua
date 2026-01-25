@@ -104,16 +104,25 @@
 --   function MyAddon:OnLogLevelChanged(level)
 --     return MyAddon.db.global
 --   end
+--
+-- It's also possible to register a custom log sink, this is useful if you want to capture either your own, or all log events as they happen, for example,
+-- to show them in a custom logging window.
+--
+--   LibLog:RegisterSink(function(addon, level, prefix, message)
+--     print(prefix .. " " .. message)
+--   end
 
 if LibStub == nil then
 	error("LibLog-1.0 requires LibStub")
 end
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 3)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 4)
 if LibLog == nil then
 	return
 end
+
+--- @alias LogSink fun(addon?: string, level: LogLevel, prefix: string, message: string)
 
 LibLog.UNKNOWN = "Unk"
 LibLog.CONFIG_KEY = "logLevel"
@@ -130,13 +139,29 @@ LibLog.LogLevel = {
 	VERBOSE = 6
 }
 
-LibLog.MIN_LEVEL = LibLog.LogLevel.INFO
+--- The default minimum log level. If not overwritten by an addon, this will be used.
+LibLog.minLevel = LibLog.minLevel or LibLog.LogLevel.INFO
 
---- @type table<any, boolean>
+--- Whether the default chat sink is enabled.
+LibLog.enableDefaultSink = LibLog.enableDefaultSink or true
+
+--- @type table<table, boolean>
 LibLog.embeds = LibLog.embeds or {}
 
 --- @type table<string, LogLevel>
 LibLog.levels = LibLog.levels or {}
+
+--- @type LogSink[]
+LibLog.sinks = LibLog.sinks or {}
+
+LibLog.levelNames = {
+	[LibLog.LogLevel.FATAL] = "FTL",
+	[LibLog.LogLevel.ERROR] = "ERR",
+	[LibLog.LogLevel.WARNING] = "WRN",
+	[LibLog.LogLevel.INFO] = "INF",
+	[LibLog.LogLevel.DEBUG] = "DBG",
+	[LibLog.LogLevel.VERBOSE] = "VRB"
+}
 
 local L = {
 	level = "Log level",
@@ -163,15 +188,6 @@ local typeColors = {
 local miscColors = {
 	["key"] = "ffde935f",
 	["evt"] = "ffb48ead"
-}
-
-local prefixes = {
-	[LibLog.LogLevel.FATAL] = "FTL",
-	[LibLog.LogLevel.ERROR] = "ERR",
-	[LibLog.LogLevel.WARNING] = "WRN",
-	[LibLog.LogLevel.INFO] = "INF",
-	[LibLog.LogLevel.DEBUG] = "DBG",
-	[LibLog.LogLevel.VERBOSE] = "VRB"
 }
 
 local mixins = {
@@ -258,6 +274,16 @@ local function GetValues(...)
 	end
 
 	return count, callback
+end
+
+--- @param prefix string
+--- @param message string
+local function DefaultChatFrameSink(_, _, prefix, message)
+	local frame = DEFAULT_CHAT_FRAME
+
+	if frame then
+		frame:AddMessage(prefix .. " " .. message)
+	end
 end
 
 --- @param string string
@@ -359,24 +385,22 @@ local function NotifyLogLevelChanged(addon, level)
 	end
 end
 
---- @param self any
+--- @param name? string
 --- @param level LogLevel
 --- @return boolean
-local function IsLogAllowed(self, level)
-	local addon = self.name or LibLog.UNKNOWN
-	local addonLevel = LibLog.levels[addon]
+local function IsLogAllowed(name, level)
+	local addonLevel = LibLog.levels[name]
 
 	if addonLevel ~= nil then
 		return level <= addonLevel
 	end
 
-	return level <= LibLog.MIN_LEVEL
+	return level <= LibLog.minLevel
 end
 
---- @param self any
+--- @param name? string
 --- @param level LogLevel
-local function GetPrefix(self, level)
-	local addon = self.name or LibLog.UNKNOWN
+local function GetPrefix(name, level)
 	local prefix
 
 	if level >= LibLog.LogLevel.DEBUG then
@@ -385,9 +409,9 @@ local function GetPrefix(self, level)
 			colors[level],
 			string.format("%.3f", GetTimePreciseSec()),
 			" ",
-			prefixes[level],
+			LibLog.levelNames[level],
 			" ",
-			addon,
+			name or LibLog.UNKNOWN,
 			":",
 			"|r"
 		}
@@ -395,9 +419,9 @@ local function GetPrefix(self, level)
 		prefix = {
 			"|c",
 			colors[level],
-			prefixes[level],
+			LibLog.levelNames[level],
 			" ",
-			addon,
+			name or LibLog.UNKNOWN,
 			":",
 			"|r"
 		}
@@ -485,7 +509,10 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function LibLog:Log(level, ...)
-	local isAllowed = IsLogAllowed(self, level)
+	--- @diagnostic disable-next-line: undefined-field
+	local name = self.name
+
+	local isAllowed = IsLogAllowed(name, level)
 	local isFatal = level == LibLog.LogLevel.FATAL
 
 	if not isAllowed and not isFatal then
@@ -505,8 +532,15 @@ function LibLog:Log(level, ...)
 	ReleaseTable(values)
 
 	if isAllowed then
-		local prefix = GetPrefix(self, level)
-		DEFAULT_CHAT_FRAME:AddMessage(prefix .. " " .. str)
+		local prefix = GetPrefix(name, level)
+
+		if LibLog.enableDefaultSink and #LibLog.sinks > 0 then
+			DefaultChatFrameSink(name, level, prefix, str)
+		end
+
+		for i = 0, #LibLog.sinks do
+			pcall(LibLog.sinks[i], name, level, prefix, str)
+		end
 	end
 
 	if isFatal then
@@ -514,6 +548,14 @@ function LibLog:Log(level, ...)
 	end
 
 	return nil
+end
+
+--- Register an external sink to replicate the logging stream.
+---
+--- @param sink LogSink
+function LibLog:RegisterSink(sink)
+	assert(type(sink) == "function", "Cannot register a non-function log sink")
+	table.insert(LibLog.sinks, sink)
 end
 
 --- Set the log level for the given addon.
@@ -558,7 +600,7 @@ end
 function LibLog:GetLogLevel(addon)
 	--- @diagnostic disable-next-line: undefined-field
 	addon = addon or self.name
-	return LibLog.levels[addon] or LibLog.MIN_LEVEL
+	return LibLog.levels[addon] or LibLog.minLevel
 end
 
 --- Create an AceGUI option table which can manipulate the log level of the given addon.
@@ -603,7 +645,7 @@ end
 
 --- Embed `LibLog-1.0` into the target object, making several logging functions available for use.
 ---
---- @generic T : any
+--- @generic T : table
 --- @param target T The target object.
 --- @return T
 function LibLog:Embed(target)

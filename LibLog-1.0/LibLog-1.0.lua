@@ -110,7 +110,7 @@ if LibStub == nil then
 end
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 2)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 3)
 if LibLog == nil then
 	return
 end
@@ -188,6 +188,78 @@ local mixins = {
 	"GetLogLevelOptionObject"
 }
 
+--- @type fun(): table
+local AcquireTable
+
+--- @type fun(tbl: table)
+local ReleaseTable
+
+do
+	local pool = {}
+
+	AcquireTable = function()
+		local result = next(pool)
+
+		if result ~= nil then
+			pool[result] = nil
+			return result
+		end
+
+		return {}
+	end
+
+	ReleaseTable = function(tbl)
+		for k in pairs(tbl) do
+			tbl[k] = nil
+		end
+
+		pool[tbl] = true
+	end
+end
+
+--- @param ... unknown
+--- @return integer
+--- @return unknown[]
+local function Pack(...)
+	local count = select("#", ...)
+	local result = AcquireTable()
+
+	for i = 1, count do
+		result[i] = select(i, ...)
+	end
+
+	return count, result
+end
+
+--- @param ... unknown
+--- @return integer
+--- @return unknown[]
+local function GetValues(...)
+	local n = select("#", ...)
+	if n ~= 1 then
+		return Pack(...)
+	end
+
+
+	local func = select(1, ...)
+	if type(func) ~= "function" then
+		return Pack(...)
+	end
+
+	local count, callback = Pack(xpcall(func, geterrorhandler()))
+
+	if callback[1] then
+		table.remove(callback, 1)
+		count = count - 1
+
+		if count == 1 and type(callback[1]) == "table" then
+			return #callback[1], callback[1]
+		end
+	end
+
+	return count, callback
+end
+
 --- @param string string
 --- @param color string
 --- @return string
@@ -208,44 +280,60 @@ local function ColorizeValue(value)
 	return Colorize(tostring(value), color)
 end
 
---- @param tbl table
-local function Destructure(tbl)
+--- @param value any
+local function Destructure(value)
 	local T_COLOR = typeColors["table"]
 	local K_COLOR = miscColors["key"]
-
 	local MAX_DEPTH = 5
 
-	local depth = 0
+	--- @type table<table, boolean>
+	local visited = AcquireTable()
 
-	local function DestructureImpl(o)
-		depth = depth + 1
-
-		if depth > MAX_DEPTH then
+	--- @param o any
+	--- @param depth integer
+	--- @return string?
+	local function DestructureImpl(o, depth)
+		if depth >= MAX_DEPTH or type(o) ~= "table" or visited[o] then
 			return ColorizeValue(o)
 		end
 
-		if type(o) == 'table' then
-			local result = Colorize("{ ", T_COLOR)
-			local first = true
+		--- @type string[]
+		local buffer = AcquireTable()
+		local first = true
 
-			for k, v in pairs(o) do
-				if not first then
-					result = result .. " "
-				end
+		visited[o] = true
 
-				result = result .. Colorize(k .. " ", K_COLOR) .. DestructureImpl(v)
+		for k, v in pairs(o) do
+			local destructured = DestructureImpl(v, depth + 1)
+
+			if destructured ~= nil then
+				table.insert(buffer, Colorize(tostring(k), K_COLOR))
+				table.insert(buffer, destructured)
+
 				first = false
 			end
-
-			depth = depth - 1
-			return result .. Colorize(" }", T_COLOR)
-		else
-			depth = depth - 1
-			return ColorizeValue(o)
 		end
+
+		visited[o] = nil
+
+		if first then
+			ReleaseTable(buffer)
+			return nil
+		end
+
+		table.insert(buffer, 1, Colorize("{", T_COLOR))
+		table.insert(buffer, Colorize("}", T_COLOR))
+
+		local result = table.concat(buffer, " ")
+
+		ReleaseTable(buffer)
+		return result
 	end
 
-	return DestructureImpl(tbl)
+	local result = DestructureImpl(value, 1)
+
+	ReleaseTable(visited)
+	return result
 end
 
 --- @param addon string
@@ -398,44 +486,31 @@ end
 --- @return unknown
 function LibLog:Log(level, ...)
 	local isAllowed = IsLogAllowed(self, level)
+	local isFatal = level == LibLog.LogLevel.FATAL
 
-	if isAllowed or level == LibLog.LogLevel.FATAL then
-		local message = {}
-		local values = { ... }
+	if not isAllowed and not isFatal then
+		return nil
+	end
 
-		if select("#", ...) == 1 and type(select(1, ...)) == "function" then
-			local callback = { xpcall(select(1, ...), geterrorhandler()) }
+	local message = AcquireTable()
+	local _, values = GetValues(...)
 
-			if callback[1] then
-				--- @cast callback any
+	for _, value in pairs(values) do
+		table.insert(message, Destructure(value))
+	end
 
-				if #callback == 2 and type(callback[2]) == "table" then
-					values = callback[2]
-				else
-					table.remove(callback, 1)
-					values = callback
-				end
-			end
-		end
+	local str = table.concat(message, " ")
 
-		for _, value in pairs(values) do
-			if type(value) == "table" then
-				table.insert(message, Destructure(value))
-			else
-				table.insert(message, ColorizeValue(value))
-			end
-		end
+	ReleaseTable(message)
+	ReleaseTable(values)
 
-		local str = table.concat(message, " ")
+	if isAllowed then
+		local prefix = GetPrefix(self, level)
+		DEFAULT_CHAT_FRAME:AddMessage(prefix .. " " .. str)
+	end
 
-		if isAllowed then
-			local prefix = GetPrefix(self, level)
-			print(prefix, str)
-		end
-
-		if level == LibLog.LogLevel.FATAL then
-			error(str, 2)
-		end
+	if isFatal then
+		error(str, 3)
 	end
 
 	return nil

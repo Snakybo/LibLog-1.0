@@ -117,7 +117,7 @@ if LibStub == nil then
 end
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 4)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 5)
 if LibLog == nil then
 	return
 end
@@ -187,7 +187,8 @@ local typeColors = {
 
 local miscColors = {
 	["key"] = "ffde935f",
-	["evt"] = "ffb48ead"
+	["evt"] = "ffb48ead",
+	["empty"] = "ff4c566a"
 }
 
 local mixins = {
@@ -310,6 +311,8 @@ end
 local function Destructure(value)
 	local T_COLOR = typeColors["table"]
 	local K_COLOR = miscColors["key"]
+	local E_COLOR = miscColors["empty"]
+
 	local MAX_DEPTH = 5
 
 	--- @type table<table, boolean>
@@ -344,7 +347,7 @@ local function Destructure(value)
 
 		if first then
 			ReleaseTable(buffer)
-			return nil
+			return Colorize("<empty table>", E_COLOR)
 		end
 
 		table.insert(buffer, 1, Colorize("{", T_COLOR))

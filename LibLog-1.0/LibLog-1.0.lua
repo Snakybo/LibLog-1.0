@@ -117,7 +117,7 @@ if LibStub == nil then
 end
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 5)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 6)
 if LibLog == nil then
 	return
 end
@@ -537,7 +537,7 @@ function LibLog:Log(level, ...)
 	if isAllowed then
 		local prefix = GetPrefix(name, level)
 
-		if LibLog.enableDefaultSink and #LibLog.sinks > 0 then
+		if LibLog.enableDefaultSink then
 			DefaultChatFrameSink(name, level, prefix, str)
 		end
 

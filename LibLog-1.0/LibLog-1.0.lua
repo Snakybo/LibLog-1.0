@@ -1,245 +1,187 @@
--- LibLog-1.0, a logging library for World of Warcraft.
--- Copyright (C) 2026 Kevin Krol
-
--- This library is free software; you can redistribute it and/or
--- modify it under the terms of the GNU Lesser General Public
--- License as published by the Free Software Foundation; either
--- version 2.1 of the License, or (at your option) any later version.
-
--- This library is distributed in the hope that it will be useful,
--- but WITHOUT ANY WARRANTY; without even the implied warranty of
--- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
--- Lesser General Public License for more details.
-
--- You should have received a copy of the GNU Lesser General Public
--- License along with this library; if not, write to the Free Software
--- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
--- USA
-
--- To use this library, embed it into your addon, either automatically using AceAddon-3.0, or manually:
+-- MIT License
 --
---   MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibLog-1.0")
--- -or-
---   LibStub("LibLog-1.0"):Embed(MyAddon)
+-- Copyright (c) 2026 Kevin Krol
 --
--- Afterwards, you will be able to log messages using:
+-- Permission is hereby granted, free of charge, to any person obtaining a copy
+-- of this software and associated documentation files (the "Software"), to deal
+-- in the Software without restriction, including without limitation the rights
+-- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+-- copies of the Software, and to permit persons to whom the Software is
+-- furnished to do so, subject to the following conditions:
 --
---   MyAddon:LogFatal(...)
---   MyAddon:LogError(...)
---   MyAddon:LogWarning(...)
---   MyAddon:LogInfo(...)
---   MyAddon:LogDebug(...)
---   MyAddon:LogVerbose(...)
+-- The above copyright notice and this permission notice shall be included in all
+-- copies or substantial portions of the Software.
 --
--- The arguments can be any number of values, they will be seperated using a whitespace. A value can be of any type, for example:
---
---   MyAddon:LogInfo("Received", true, false, nil, 1.356)
---   -- INF MyAddon: Received true false nil 1.356
---
--- You can manipulate the current log level using:
---
---   MyAddon:SetLogLevel(LibLog.LogLevel.ERROR)
---   MyAddon:GetLogLevel()
---
--- When using AceConfigDialog-3.0, you can almost seamlessly integrate a setting for the log level into your addons settings panel, simply:
---
---   {
---     logLevel = MyAddon:GetLogLevelOptionObject(MyAddon.db.global)
---   }
---
--- The second paramter refers to the configuration object, usually a table within your saved variables.
--- For more complicated setups where you wish to have control over the option, you can use a mixin:
---
---   {
---     logLevel = Mixin(MyAddon:GetLogLevelOptionObject(MyAddon.db.global), {
---       order = 200
---     })
---   }
---
--- To initialize the log level for your addon upon load, you can use the following:
---
---   function MyAddon:OnInitialize()
---     MyAddon.db = LibStub("AceDB-3.0"):New("MyAddonDB")
---
---     self:SetLogLevelFromConfigTable(MyAddon.db.global)
---   end
---
--- LibLog-1.0 works best when your addon object has a `name` field. When using AceAddon-3.0, this is already the case, however when embedding manually, it is
--- recommended to set a `name` field to the name of your addon, otherwise LibLog-1.0 cannot determine the source of the log message, and will have to mark it as
--- <unknown>.
---
--- Logging methods also allow for a callback function, this is a special case which can be used to improve performance, since filtered out log levels are only
--- evaluated after the message contents have been computed it's possible for your addon to perform complex logic for nothing. Specifying a callback function as
--- the first and only parameter, allows you to perform that logic on-demand, and ensure it does not impact performance when logs are disabled.
---
---   MyAddon:LogVerbose(function()
---     local result = {}
---
---     for i = 1, GetNumGroupMembers() do
---       table.insert(result, UnitName("party" .. i))
---     end
---
---     return result
---   end)
---
--- -or-
---
---   MyAddon:LogInfo(function()
---     return 1, true, "UNIT_HEALTH"
---   end)
---
--- The callback can return either a table, or varargs.
---
--- Since log levels can be modified externally, by, for example, an addon that manages log levels per addon, there is a callback that can be used to be notified
--- when your log level has changed.
---
---   function MyAddon:OnLogLevelChanged(level)
---
--- Within this callback, you can do two things, either manually update your configuration object, or return it for automatic handling.
---
---   function MyAddon:OnLogLevelChanged(level)
---     MyAddon.db.global[LibLog.CONFIG_KEY] = level
---   end
---
---   function MyAddon:OnLogLevelChanged(level)
---     return MyAddon.db.global
---   end
---
--- It's also possible to register a custom log sink, this is useful if you want to capture either your own, or all log events as they happen, for example,
--- to show them in a custom logging window.
---
---   LibLog:RegisterSink(function(addon, level, prefix, message)
---     print(prefix .. " " .. message)
---   end
+-- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+-- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+-- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+-- SOFTWARE.
 
 if LibStub == nil then
 	error("LibLog-1.0 requires LibStub")
 end
 
+--- @class LibLog-1.0.LogMessage
+--- @field public message string The human-readable log string.
+--- @field public level LibLog-1.0.LogLevel The (numeric) level of the log. Can be compared against `LibLog.LogLevel`, or stringified using `LibLog.labels`.
+--- @field public addon? string The name of the source addon.
+--- @field public time integer The number of seconds that have elapsed since the Unix epoch.
+--- @field public sequenceId integer The unique sequence identifier of the log within the current second.
+--- @field public properties table<string, unknown> All properties that have been extracted from the template string or manually injected.
+
+--- @class LibLog-1.0.Sink
+--- @field public callback fun(message: LibLog-1.0.LogMessage)
+--- @field public enabled boolean
+
+--- @class LibLog-1.0.MessageTemplate
+--- @field public message string The parsed template string, where the named parameters have been replaced to conform with `string.format`.
+--- @field public properties string[] The named parameters found within the template string.
+
+--- @class LibLog-1.0.Property
+--- @field public name string The name of the parameter.
+--- @field public value unknown The raw value.
+--- @field public isCallback boolean Whether the `value` is a `function`.
+
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 6)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 7)
 if LibLog == nil then
 	return
 end
 
---- @alias LogSink fun(addon?: string, level: LogLevel, prefix: string, message: string)
+--- @class LibLog-1.0.Logger
+--- @field public name? string The name of the addon logs will be attributed to.
+local Logger = {}
 
-LibLog.UNKNOWN = "Unk"
-LibLog.CONFIG_KEY = "logLevel"
-LibLog.CALLBACK_NAME = "OnLogLevelChanged"
-
---- @enum LogLevel
+--- @enum LibLog-1.0.LogLevel
 LibLog.LogLevel = {
 	NONE = 0,
-	FATAL = 1,
-	ERROR = 2,
-	WARNING = 3,
-	INFO = 4,
-	DEBUG = 5,
-	VERBOSE = 6
+	VERBOSE = 1, -- High-frequency, noisy data that is rarely enabled outside of debugging.
+	DEBUG = 2, -- Code paths and state changes that are useful when determining how something happened.
+	INFO = 3, -- General status updates and runtime milestones.
+	WARNING = 4, -- User-error, or other non-breaking issues.
+	ERROR = 5, -- A high-severity logic issue that leaves functionality unavailable or expections broken.
+	FATAL = 6 -- A critical or otherwise unrecoverable error that must halt execution.
 }
 
---- The default minimum log level. If not overwritten by an addon, this will be used.
-LibLog.minLevel = LibLog.minLevel or LibLog.LogLevel.INFO
+LibLog.labels = {
+	[LibLog.LogLevel.VERBOSE] = "VRB",
+	[LibLog.LogLevel.DEBUG] = "DBG",
+	[LibLog.LogLevel.INFO] = "INF",
+	[LibLog.LogLevel.WARNING] = "WRN",
+	[LibLog.LogLevel.ERROR] = "ERR",
+	[LibLog.LogLevel.FATAL] = "FTL"
+}
 
---- Whether the default chat sink is enabled.
-LibLog.enableDefaultSink = LibLog.enableDefaultSink or true
+LibLog.colorScheme = {
+	[LibLog.LogLevel.VERBOSE] = "ff6e6e6e",
+	[LibLog.LogLevel.DEBUG] = "ffa1a1a1",
+	[LibLog.LogLevel.INFO] = "ff00dfff",
+	[LibLog.LogLevel.WARNING] = "ffffcf40",
+	[LibLog.LogLevel.ERROR] = "ffff5f5f",
+	[LibLog.LogLevel.FATAL] = "ffff0000",
+	["table"] = "ff808080",
+	["tableKey"] = "ffffa64d",
+	["string"] = "fffff9b0",
+	["number"] = "ff38ff70",
+	["boolean"] = "ff99ff00",
+	["nil"] = "ffff77ff",
+	["event"] = "ffbd93f9",
+}
 
+LibLog.configKey = "logLevel"
+
+--- @private
 --- @type table<table, boolean>
 LibLog.embeds = LibLog.embeds or {}
 
---- @type table<string, LogLevel>
+--- @private
+--- @type table<string, LibLog-1.0.LogLevel>
 LibLog.levels = LibLog.levels or {}
 
---- @type LogSink[]
+--- @private
+--- @type table<string, LibLog-1.0.Sink>
 LibLog.sinks = LibLog.sinks or {}
 
-LibLog.levelNames = {
-	[LibLog.LogLevel.FATAL] = "FTL",
-	[LibLog.LogLevel.ERROR] = "ERR",
-	[LibLog.LogLevel.WARNING] = "WRN",
-	[LibLog.LogLevel.INFO] = "INF",
-	[LibLog.LogLevel.DEBUG] = "DBG",
-	[LibLog.LogLevel.VERBOSE] = "VRB"
-}
+--- @private
+--- @type table<string, table<string, LibLog-1.0.Property>>
+LibLog.properties = LibLog.properties or {}
 
 local L = {
 	level = "Log level",
 	level_desc = "Select the logging level for this addon. Select 'NONE' to completely disable logging.\n\nLower values mean more messages get logged, where 'VERBOSE' logs everything."
 }
 
-local colors = {
-	[LibLog.LogLevel.FATAL] = "ffff0000",
-	[LibLog.LogLevel.ERROR] = "ffcc6666",
-	[LibLog.LogLevel.WARNING] = "fff0c674",
-	[LibLog.LogLevel.INFO] = "ff81a2be",
-	[LibLog.LogLevel.DEBUG] = "ff707880",
-	[LibLog.LogLevel.VERBOSE] = "ff707880"
-}
+--- @type LibLog-1.0.LogLevel
+local minLogLevel = LibLog.LogLevel.INFO
 
-local typeColors = {
-	["table"] = "ff969896",
-	["string"] = "ffc5c8c6",
-	["number"] = "ff8abeb7",
-	["boolean"] = "ff8abeb7",
-	["nil"] = "bb5f819d"
-}
+--- @type table<string, LibLog-1.0.MessageTemplate>
+local templateCache = {}
 
-local miscColors = {
-	["key"] = "ffde935f",
-	["evt"] = "ffb48ead",
-	["empty"] = "ff4c566a"
-}
+--- @type table<table, boolean>
+local tableCache = {}
 
-local mixins = {
-	"LogVerbose",
-	"LogDebug",
-	"LogInfo",
-	"LogWarning",
-	"LogError",
-	"LogFatal",
-	"Log",
-	"SetLogLevel",
-	"SetLogLevelFromConfigTable",
-	"GetLogLevel",
-	"GetLogLevelOptionObject"
-}
+local currentTime = 0
+local currentSequenceId = 1
 
---- @type fun(): table
-local AcquireTable
+--- @param err any
+--- @return function
+local function ErrorHandler(err)
+	return geterrorhandler()(err)
+end
 
---- @type fun(tbl: table)
-local ReleaseTable
+local function AcquireCachedTable()
+	local result = next(tableCache)
 
-do
-	local pool = {}
-
-	AcquireTable = function()
-		local result = next(pool)
-
-		if result ~= nil then
-			pool[result] = nil
-			return result
-		end
-
-		return {}
+	if result ~= nil then
+		tableCache[result] = nil
+		return result
 	end
 
-	ReleaseTable = function(tbl)
-		for k in pairs(tbl) do
-			tbl[k] = nil
-		end
+	return {}
+end
 
-		pool[tbl] = true
+--- @param tbl table
+local function ReleaseCachedTable(tbl)
+	for k in pairs(tbl) do
+		tbl[k] = nil
 	end
+
+	tableCache[tbl] = true
+end
+
+--- @param template string
+--- @return LibLog-1.0.MessageTemplate
+local function GetMessageTemplate(template)
+	local result = templateCache[template]
+	if result ~= nil then
+		return result
+	end
+
+	result = {
+		--- @diagnostic disable-next-line: assign-type-mismatch
+		message = nil,
+		properties = {}
+	}
+
+	result.message = string.gsub(template, "{(.-)}", function(key)
+		table.insert(result.properties, key)
+		return "%s"
+	end)
+
+	templateCache[template] = result
+
+	return result
 end
 
 --- @param ... unknown
 --- @return integer
 --- @return unknown[]
-local function Pack(...)
+local function PackVarargs(...)
 	local count = select("#", ...)
-	local result = AcquireTable()
+	local result = AcquireCachedTable()
 
 	for i = 1, count do
 		result[i] = select(i, ...)
@@ -254,36 +196,57 @@ end
 local function GetValues(...)
 	local n = select("#", ...)
 	if n ~= 1 then
-		return Pack(...)
+		return PackVarargs(...)
 	end
-
 
 	local func = select(1, ...)
 	if type(func) ~= "function" then
-		return Pack(...)
+		return PackVarargs(...)
 	end
 
-	local count, callback = Pack(xpcall(func, geterrorhandler()))
+	local count, callback = PackVarargs(xpcall(func, ErrorHandler))
 
 	if callback[1] then
 		table.remove(callback, 1)
-		count = count - 1
-
-		if count == 1 and type(callback[1]) == "table" then
-			return #callback[1], callback[1]
-		end
+		return count - 1, callback
 	end
 
-	return count, callback
+	return 0, AcquireCachedTable()
 end
 
---- @param prefix string
---- @param message string
-local function DefaultChatFrameSink(_, _, prefix, message)
+--- @param message LibLog-1.0.LogMessage
+local function ChatFrameSink(message)
 	local frame = DEFAULT_CHAT_FRAME
 
+	--- @type string[]
+	local prefix
+
+	if message.level <= LibLog.LogLevel.DEBUG then
+		prefix = {
+			"|c",
+			LibLog.colorScheme[message.level],
+			date("%H:%M:%S", message.time) --[[@as string]],
+			" ",
+			LibLog.labels[message.level],
+			" ",
+			message.addon,
+			":",
+			"|r"
+		}
+	else
+		prefix = {
+			"|c",
+			LibLog.colorScheme[message.level],
+			LibLog.labels[message.level],
+			" ",
+			message.addon,
+			":",
+			"|r"
+		}
+	end
+
 	if frame then
-		frame:AddMessage(prefix .. " " .. message)
+		frame:AddMessage(table.concat(prefix, "") .. " " .. message.message)
 	end
 end
 
@@ -294,40 +257,40 @@ local function Colorize(string, color)
 	return "|c" .. color .. string .. "|r"
 end
 
---- @param value any
+--- @param value unknown
 --- @return string
 local function ColorizeValue(value)
 	local valueType = type(value)
 
 	if valueType == "string" and C_EventUtils.IsEventValid(value) then
-		return Colorize(value, miscColors["evt"])
+		return Colorize(value, LibLog.colorScheme["event"])
 	end
 
-	local color = typeColors[valueType] or typeColors["string"]
+	local color = LibLog.colorScheme[valueType] or LibLog.colorScheme["string"]
 	return Colorize(tostring(value), color)
 end
 
---- @param value any
+--- @param value unknown
+--- @return string
 local function Destructure(value)
-	local T_COLOR = typeColors["table"]
-	local K_COLOR = miscColors["key"]
-	local E_COLOR = miscColors["empty"]
+	local T_COLOR = LibLog.colorScheme["table"]
+	local K_COLOR = LibLog.colorScheme["tableKey"]
 
 	local MAX_DEPTH = 5
 
 	--- @type table<table, boolean>
-	local visited = AcquireTable()
+	local visited = AcquireCachedTable()
 
-	--- @param o any
+	--- @param o unknown
 	--- @param depth integer
-	--- @return string?
+	--- @return string
 	local function DestructureImpl(o, depth)
 		if depth >= MAX_DEPTH or type(o) ~= "table" or visited[o] then
 			return ColorizeValue(o)
 		end
 
 		--- @type string[]
-		local buffer = AcquireTable()
+		local buffer = AcquireCachedTable()
 		local first = true
 
 		visited[o] = true
@@ -346,8 +309,8 @@ local function Destructure(value)
 		visited[o] = nil
 
 		if first then
-			ReleaseTable(buffer)
-			return Colorize("<empty table>", E_COLOR)
+			ReleaseCachedTable(buffer)
+			return Colorize("{}", T_COLOR)
 		end
 
 		table.insert(buffer, 1, Colorize("{", T_COLOR))
@@ -355,219 +318,205 @@ local function Destructure(value)
 
 		local result = table.concat(buffer, " ")
 
-		ReleaseTable(buffer)
+		ReleaseCachedTable(buffer)
+
 		return result
 	end
 
 	local result = DestructureImpl(value, 1)
 
-	ReleaseTable(visited)
+	ReleaseCachedTable(visited)
 	return result
 end
 
---- @param addon string
---- @param level? LogLevel
-local function NotifyLogLevelChanged(addon, level)
-	local function Notify(obj)
-		local cb = obj[LibLog.CALLBACK_NAME]
+--- @param addon? string
+--- @param message LibLog-1.0.MessageTemplate
+--- @param values unknown[]
+--- @return table<string, unknown>
+local function PopulateMessageProperties(addon, message, values)
+	if addon == nil then
+		return {}
+	end
 
-		if cb ~= nil then
-			local success, configTable = xpcall(cb, geterrorhandler(), obj, level)
+	--- @type table<string, unknown>
+	local result = {}
 
-			if success and type(configTable) == "table" then
-				configTable[LibLog.CONFIG_KEY] = level
+	local global = LibLog.properties[addon]
+	if global ~= nil then
+		for _, v in pairs(global) do
+			if v.isCallback then
+				local success, value = xpcall(v.value, ErrorHandler)
+
+				if success then
+					result[v.name] = value
+				end
+			else
+				result[v.name] = v.value
 			end
 		end
 	end
 
-	for k in pairs(LibLog.embeds) do
-		if k.name == addon then
-			Notify(k)
-			break
-		end
+	for i = 1, #message.properties do
+		result[message.properties[i]] = values[i]
 	end
+
+	return result
 end
 
 --- @param name? string
---- @param level LogLevel
+--- @param level LibLog-1.0.LogLevel
 --- @return boolean
 local function IsLogAllowed(name, level)
 	local addonLevel = LibLog.levels[name]
 
 	if addonLevel ~= nil then
-		return level <= addonLevel
+		return level >= addonLevel
 	end
 
-	return level <= LibLog.minLevel
+	return level >= minLogLevel
 end
 
---- @param name? string
---- @param level LogLevel
-local function GetPrefix(name, level)
-	local prefix
-
-	if level >= LibLog.LogLevel.DEBUG then
-		prefix = {
-			"|c",
-			colors[level],
-			string.format("%.3f", GetTimePreciseSec()),
-			" ",
-			LibLog.levelNames[level],
-			" ",
-			name or LibLog.UNKNOWN,
-			":",
-			"|r"
-		}
-	else
-		prefix = {
-			"|c",
-			colors[level],
-			LibLog.levelNames[level],
-			" ",
-			name or LibLog.UNKNOWN,
-			":",
-			"|r"
-		}
-	end
-
-	return table.concat(prefix, "")
-end
-
---- Log a VRB message to the console. Verbose logs should be used for high-frequency logs or low-level data. For example, raw calculations or other raw data.
+--- Log a VRB message. Verbose logs should be used for high-frequency logs or low-level data. For example, raw calculations or other raw data.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogVerbose(...)` to immediately exit the running function with a `nil` value.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogVerbose(template, ...)` to immediately exit the running function with a `nil`
+--- value.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogVerbose(...)
-	return self:Log(LibLog.LogLevel.VERBOSE, ...)
+function Logger:LogVerbose(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.VERBOSE, template, ...)
 end
 
---- Log a DBG message to the console. Debug logs should be used for developers to verify code paths, state changes, or event registration during active
+--- Log a DBG message. Debug logs should be used for developers to verify code paths, state changes, or event registration during active
 --- development and testing.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogDebug(...)` to immediately exit the running function with a `nil` value.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogDebug(template, ...)` to immediately exit the running function with a `nil` value.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogDebug(...)
-	return self:Log(LibLog.LogLevel.DEBUG, ...)
+function Logger:LogDebug(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.DEBUG, template, ...)
 end
 
---- Log an INF message to the console. Info logs shoud be used for general status updates and milestones. Generally when following the happy path of your code
+--- Log an INF message. Info logs shoud be used for general status updates and milestones. Generally when following the happy path of your code
 --- to indicate the addon is working. For example, successful loading, profile changes, or user-triggered actions.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogInfo(...)` to immediately exit the running function with a `nil` value.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogInfo(template, ...)` to immediately exit the running function with a `nil` value.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogInfo(...)
-	return self:Log(LibLog.LogLevel.INFO, ...)
+function Logger:LogInfo(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.INFO, template, ...)
 end
 
---- Log a WRN message to the console. Warning logs should be the result of user error or other non-breaking issues. For example, optional settings are missing
+--- Log a WRN message. Warning logs should be the result of user error or other non-breaking issues. For example, optional settings are missing
 --- or an input is invalid.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogWarning(...)` to immediately exit the running function with a `nil` value.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogWarning(template, ...)` to immediately exit the running function with a `nil`
+--- value.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogWarning(...)
-	return self:Log(LibLog.LogLevel.WARNING, ...)
+function Logger:LogWarning(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.WARNING, template, ...)
 end
 
---- Log an ERR message to the console. Error logs should indicate a high severity logic failure. For example, an API returns unexpected data. An error likely
+--- Log an ERR message. Error logs should indicate a high severity logic failure. For example, an API returns unexpected data. An error likely
 --- indicates a bug that should be fixed, though execution can continue.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogError(...)` to immediately exit the running function with a `nil` value.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogError(template, ...)` to immediately exit the running function with a `nil` value.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogError(...)
-	return self:Log(LibLog.LogLevel.ERROR, ...)
+function Logger:LogError(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.ERROR, template, ...)
 end
 
---- Log a FTL message to the console, and submit the error to the error handler. Fatal logs are the highest severity, and should be used sparringly, when
+--- Log a FTL message, and submit the error to the error handler. Fatal logs are the highest severity, and should be used sparringly, when
 --- execution **cannot** continue and must be halted because continuing may lead to data corruption or unrecoverable states. For example, misssing libraries
 --- or broken saved variables.
 ---
---- This function returns an `unknown` value to allow for `return MyAddon:LogFatal(...)` to immediately exit the running function. Though this function will
---- trigger a Lua error pop-up when enabled by the user.
+--- This function returns an `unknown` value to allow for `return MyAddon:LogFatal(template, ...)` to immediately exit the running function. Though this
+--- function will trigger a Lua error pop-up when enabled by the user.
 ---
+--- @param template string The template message, use `{propertyName}` to enable parameter replacements.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:LogFatal(...)
-	return self:Log(LibLog.LogLevel.FATAL, ...)
+function Logger:LogFatal(template, ...)
+	return LibLog:Log(self.name, LibLog.LogLevel.FATAL, template, ...)
 end
 
---- Log a message to the console.
+--- Push a new property onto the stack, the value of this property will be present within the context of all further logs, until it is popped.
 ---
---- Any log level other than `FATAL` will be printed to the standard output, a log level of `FATAL` will additionally also be submitted to the error handler,
---- and halt execution of the current code path.
----
---- This function returns an `unknown` value to allow for `return MyAddon:LogFatal(...)` to immediately exit the running function when required.
----
---- @private
---- @param level LogLevel The log level to log with.
---- @param ... any The values to log.
---- @return unknown
-function LibLog:Log(level, ...)
-	--- @diagnostic disable-next-line: undefined-field
-	local name = self.name
-
-	local isAllowed = IsLogAllowed(name, level)
-	local isFatal = level == LibLog.LogLevel.FATAL
-
-	if not isAllowed and not isFatal then
-		return nil
+--- @param name string
+--- @param value unknown|function
+function Logger:PushLogProperty(name, value)
+	if self.name == nil then
+		return
 	end
 
-	local message = AcquireTable()
-	local _, values = GetValues(...)
+	--- @type LibLog-1.0.Property
+	local property = {
+		name = name,
+		value = value,
+		isCallback = type(value) == "function"
+	}
 
-	for _, value in pairs(values) do
-		table.insert(message, Destructure(value))
-	end
-
-	local str = table.concat(message, " ")
-
-	ReleaseTable(message)
-	ReleaseTable(values)
-
-	if isAllowed then
-		local prefix = GetPrefix(name, level)
-
-		if LibLog.enableDefaultSink then
-			DefaultChatFrameSink(name, level, prefix, str)
-		end
-
-		for i = 0, #LibLog.sinks do
-			pcall(LibLog.sinks[i], name, level, prefix, str)
-		end
-	end
-
-	if isFatal then
-		error(str, 3)
-	end
-
-	return nil
+	LibLog.properties[self.name] = LibLog.properties[self.name] or {}
+	LibLog.properties[self.name][name] = property
 end
 
---- Register an external sink to replicate the logging stream.
+--- Pop properties that were previously pushed.
 ---
---- @param sink LogSink
-function LibLog:RegisterSink(sink)
-	assert(type(sink) == "function", "Cannot register a non-function log sink")
-	table.insert(LibLog.sinks, sink)
+--- @param ... string
+function Logger:PopLogProperty(...)
+	if self.name == nil then
+		return
+	end
+
+	local properties = LibLog.properties[self.name]
+	if properties == nil then
+		return
+	end
+
+	local n = select("#", ...)
+	for i = 1, n do
+		local name = select(i, ...)
+		properties[name] = nil
+	end
+end
+
+--- Create a closure where all logs contain the given properties.
+---
+--- @param properties table<string, unknown>
+--- @param closure fun()
+function Logger:WithLogContext(properties, closure)
+	for k, v in pairs(properties) do
+		self:PushLogProperty(k, v)
+	end
+
+	local ok, err = pcall(closure)
+
+	for k in pairs(properties) do
+		self:PopLogProperty(k)
+	end
+
+	if not ok then
+		error(err, 2)
+	end
 end
 
 --- Set the log level for the given addon.
 ---
 --- This will invoke a callback function on the addon to notify its log level has changed, allowing the addon to maintain its own saved variables.
 ---
---- @param level? LogLevel The log level to set.
---- @param addon? string The name of the addon to manipulate. If `nil`, it will attempt to retrieve a name from `self.name`.
-function LibLog:SetLogLevel(level, addon)
+--- @param level? LibLog-1.0.LogLevel The log level to set.
+function Logger:SetLogLevel(level, addon)
 	--- @diagnostic disable-next-line: undefined-field
 	addon = addon or self.name
 	if addon == nil then
@@ -575,42 +524,32 @@ function LibLog:SetLogLevel(level, addon)
 	end
 
 	LibLog.levels[addon] = level
-
-	NotifyLogLevelChanged(addon, level)
 end
 
 --- Set the log level for the given addon using a configuration table.
 ---
 --- @param configTable table A configuration table to retrieve the current log level from, usually your saved variables.
---- @param addon string? The name of the addon to manipulate. If `nil`, it will attempt to retrieve a name from `self.name`.
-function LibLog:SetLogLevelFromConfigTable(configTable, addon)
-	--- @diagnostic disable-next-line: undefined-field
-	addon = addon or self.name
-	if addon == nil then
+function Logger:SetLogLevelFromConfigTable(configTable)
+	if self.name == nil then
 		return
 	end
 
-	local level = configTable[LibLog.CONFIG_KEY]
+	local level = configTable[LibLog.configKey]
 
 	if level ~= nil then
-		self:SetLogLevel(level, addon)
+		self:SetLogLevel(level)
 	end
 end
 
 --- Get the current log level for the given addon.
----
---- @param addon string? The name of the addon to retrieve the log level for. If `nil`, it will attempt to retrieve a name from `self.name`.
-function LibLog:GetLogLevel(addon)
-	--- @diagnostic disable-next-line: undefined-field
-	addon = addon or self.name
-	return LibLog.levels[addon] or LibLog.minLevel
+function Logger:GetLogLevel()
+	return LibLog.levels[self.name] or minLogLevel
 end
 
 --- Create an AceGUI option table which can manipulate the log level of the given addon.
 ---
 --- @param configTable table A configuration table to store and retrieve current log level values from, usually your saved variables.
---- @param addon? string The name of the addon to manipulate. If `nil`, it will attempt to retrieve a name from `self.name`.
-function LibLog:GetLogLevelOptionObject(configTable, addon)
+function Logger:GetLogLevelOptionObject(configTable)
 	return {
 		name = L.level,
 		desc = L.level_desc,
@@ -632,18 +571,72 @@ function LibLog:GetLogLevelOptionObject(configTable, addon)
 				table.insert(result, v)
 			end
 
-			table.sort(result, function(l, r) return l < r end)
+			table.sort(result, function(l, r)
+				return l < r
+			end)
 
 			return result
 		end,
 		get = function()
-			return configTable[LibLog.CONFIG_KEY] or LibLog:GetLogLevel(addon)
+			return configTable[LibLog.configKey] or self:GetLogLevel()
 		end,
 		set = function(_, value)
-			LibLog:SetLogLevel(value, addon)
-			configTable[LibLog.CONFIG_KEY] = value
+			self:SetLogLevel(value)
+			configTable[LibLog.configKey] = value
 		end
 	}
+end
+
+--- Register an external sink to replicate the logging stream.
+---
+--- @param name string
+--- @param callback fun(message: LibLog-1.0.LogMessage)
+function LibLog:RegisterSink(name, callback)
+	assert(type(callback) == "function", "Cannot register a non-function log sink")
+
+	LibLog.sinks[name] = {
+		callback = callback,
+		enabled = true
+	}
+end
+
+--- Enable a sink.
+---
+--- @param name string
+function LibLog:EnableSink(name)
+	local sink = LibLog.sinks[name]
+
+	if sink ~= nil then
+		sink.enabled = false
+	end
+end
+
+--- Disable a sink, preventing it from receiving new messages until re-enabled.
+---
+--- @param name string
+function LibLog:DisableSink(name)
+	local sink = LibLog.sinks[name]
+
+	if sink ~= nil then
+		sink.enabled = false
+	end
+end
+
+--- Get all registered, or all enabled sinks.
+---
+--- @param enabledOnly? boolean
+--- @return string[]
+function LibLog:GetSinks(enabledOnly)
+	--- @type string[]
+	local result = {}
+
+	for name, sink in pairs(LibLog.sinks) do
+		if not enabledOnly or (enabledOnly and sink.enabled) then
+			table.insert(result, name)
+		end
+	end
+
+	return result
 end
 
 --- Embed `LibLog-1.0` into the target object, making several logging functions available for use.
@@ -652,13 +645,122 @@ end
 --- @param target T The target object.
 --- @return T
 function LibLog:Embed(target)
-	for _, v in pairs(mixins) do
-		target[v] = self[v]
+	for k, v in pairs(Logger) do
+		target[k] = v
 	end
 
 	LibLog.embeds[target] = true
 
 	return target
+end
+
+--- Log a message to the console.
+---
+--- Any log level other than `FATAL` will be printed to the standard output, a log level of `FATAL` will additionally also be submitted to the error handler,
+--- and halt execution of the current code path.
+---
+--- This function returns an `unknown` value to allow for `return MyAddon:LogFatal(...)` to immediately exit the running function when required.
+---
+--- @private
+--- @param addon? string The name of the addon.
+--- @param level LibLog-1.0.LogLevel The log level to log with.
+--- @param template string The message template.
+--- @param ... any The values to log.
+--- @return unknown
+function LibLog:Log(addon, level, template, ...)
+	local isAllowed = IsLogAllowed(addon, level)
+	local isFatal = level == LibLog.LogLevel.FATAL
+
+	if not isAllowed and not isFatal then
+		return nil
+	end
+
+	local message = GetMessageTemplate(template)
+	local properties = AcquireCachedTable() --[[@as string[] ]]
+	local _, values = GetValues(...)
+
+	for i = 1, #message.properties do
+		local value = values[i]
+		properties[i] = Destructure(value)
+	end
+
+	local parsedMessage = string.format(message.message, unpack(properties))
+
+	if isAllowed then
+		local now = time()
+
+		if now ~= currentTime then
+			currentTime = now
+			currentSequenceId = 1
+		else
+			currentSequenceId = currentSequenceId + 1
+		end
+
+		--- @type LibLog-1.0.LogMessage
+		local result = {
+			message = parsedMessage,
+			addon = addon,
+			level = level,
+			time = currentTime,
+			sequenceId = currentSequenceId,
+			properties = PopulateMessageProperties(addon, message, values)
+		}
+
+		ChatFrameSink(result)
+
+		for _, sink in pairs(LibLog.sinks) do
+			if sink.enabled then
+				xpcall(sink.callback, ErrorHandler, result)
+			end
+		end
+	end
+
+	ReleaseCachedTable(values)
+	ReleaseCachedTable(properties)
+
+	if isFatal then
+		error(parsedMessage, 3)
+	end
+
+	return nil
+end
+
+--- Run a test suite, showcasing all functionality.
+---
+--- @private
+function LibLog:TestSuite()
+	local Addon = LibLog:Embed({
+		name = "TestSuite"
+	})
+
+    Addon:SetLogLevel(LibLog.LogLevel.INFO)
+    Addon:LogVerbose("HIDDEN: Verbose")
+    Addon:LogDebug("HIDDEN: Debug")
+    Addon:LogInfo("VISIBLE: Info")
+    Addon:LogWarning("VISIBLE: Warning")
+
+    Addon:LogInfo("string={stringValue}, number={numberValue}, boolean={booleanValue}, nil={nilValue}, plain text", "string", 123.456, true, nil)
+    Addon:LogInfo("Complex: {complexTable}", {
+        sub = { a = 1, b = { "deep" } },
+        empty = {},
+        list = { 10, nil, 30 }
+    })
+    Addon:LogInfo("Empty Top-Level: {emptyTable}", {})
+
+    local circular = { name = "Self" }
+    circular.child = circular
+    Addon:LogInfo("Circular: {circularTable}", circular)
+	Addon:LogInfo("Too deep: {tooDeepTable}", { two = { three = { four = { five = { six = { "test" }}}}}})
+
+	Addon:LogInfo("{player} is {online} with {hp} HP", "Arthas", true, 50.5)
+	Addon:LogInfo("With more parameters than arguments: {player} is {online} with {hp} HP", "Arthas")
+	Addon:LogInfo("With more arguments than parameters: {player} is {online} with {hp} HP", "Arthas", true, 50.5, "extra", 0.2, true)
+	Addon:LogInfo("{cpu} at {time}", function()
+		return "0.01ms", GetTime()
+	end)
+
+	LibLog.embeds[Addon] = nil
+	LibLog.levels[Addon.name] = nil
 end
 
 for target in pairs(LibLog.embeds) do

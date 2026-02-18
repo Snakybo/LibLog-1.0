@@ -1,155 +1,152 @@
 # LibLog-1.0
 
-LibLog-1.0 is a logging library for World of Warcraft. It allows other addons to use a standardized logging format which is configurable at runtime out of the
-box.
+LibLog-1.0 is a logging library for World of Warcraft. It aims to be easy to use with a simple API. LibLog-1.0's biggest feature is that its built for
+structured logging.
 
-## Quick example
-
-![Log example](.github/images/example.png)
+There are several related addons available which can capture the output of LibLog-1.0 and visualize it to an [in-game window](https://github.com/Snakybo/LogSink-Table), or [saved variables](https://github.com/Snakybo/LogSink-SavedVariables).
 
 ```lua
-self:LogVerbose("A verbose message", 3.14, true)
-
-self:LogDebug("A debug message", "with multiple", "strings")
-
-self:LogInfo("An info message", { "with", 1, "inner", "table" })
-
-self:LogWarning("A warning message", { with = { nested = { tables = 42 }}})
-
-self:LogError(function()
-	return "An error message", "using a callback function", false
-end)
-
-self:LogFatal(function()
-	local result = {
-		"A fatal message using a callback function that returns an array"
-	}
-
-	for i = 1, 10 do
-		table.insert(result, i)
-	end
-
-	return result
-end)
+MyAddon:LogInfo("My current health is {health}, and I have {mana} mana", UnitHealth("player"), UnitPower("player"))
 ```
+
+LibLog-1.0 uses a lite¹ version of [Message Templates](https://messagetemplates.org/), which is a DSL that standardizes formatted strings with named
+parameters. Instead of formatting variables directly into the text, LibLog-1.0 captures the value associated with the value.
+
+The above example will record two properties (`health`, and `mana`) in the log object, when inspecting the log object, they appear in a `properties` table,
+alongside the timestamp, message, and log level.
+
+```lua
+{
+  -- <other fields omitted>
+  properties = {
+    health = 50,
+    mana = 100
+  }
+}
+```
+
+Note that even though LibLog-1.0 is built to work with structured logs, it will first and foremost still print human-readable text into the chat window.
+When no additional sink addons are installed, that's all it does. It still offers the full suite of features, they will just be mostly transparant, which is how
+99.9% of users will experience it.
+
+¹ Lite because it doesn't support the more advanced features such as `@`, `$`, and `:000`.
+
+## Structured logging.. but why?
+
+Traditional (unstructured) logging simply writes plain text messages that can contain variable data.
+
+```lua
+print("My name is", UnitName("player"), "on realm", UnitRealm("player"))
+-- My name is Arthas on realm Frostmourne
+```
+
+Whilst this is perfectly readable, its difficult to parse and extract data from. For example, if you prefix your logs with the name of the player that performed
+the action, it'd be difficult to reliably filter those logs to a specific player.
+
+```txt
+Thrall: UNIT_SPELLCAST_SUCCEEDED Bloodlust
+Khadgar: UNIT_SPELLCAST_SUCCEEDED Blink
+Thrall: UNIT_SPELLCAST_FAILED Lightning Bolt
+Khadgar: UNIT_SPELLCAST_SUCCEEDED Fire Blast
+```
+
+Try determining who cast Bloodlust, who failed a cast, which player cast the most abilities, etc. especially if the number of players increases to 20, and the
+amount of logs increases to the duration of a typical raid fight.
+
+Structured logging solves this by capturing and organizing data into consistent fields. With structured logging, each of the previous logs will contain the same
+properties.
+
+```lua
+{
+  -- <other fields omitted>
+  properties = {
+    name = "Thrall",
+    eventName = "UNIT_SPELLCAST_SUCCEEDED",
+	spellName = "Bloodlust"
+  }
+},
+{
+  -- <other fields omitted>
+  properties = {
+    name = "Khadgar",
+    eventName = "UNIT_SPELLCAST_SUCCEEDED",
+	spellName = "Blink"
+  }
+}
+```
+
+This makes it trivial to query on this data and answer the above questions. It also opens the way for more debuggable addons by visualizing this data.
 
 ## Features
 
-* Severity levels
-* Information rich
-* Color coding
-* Table destructuring
-* Callback functions
-* Configurable
-* Custom sinks
-
-### Severity levels
-
-LibLog-1.0 supports six severity levels. Messages are only logged if their level is equal to or higher than the configured threshold.
-
-Level | Method | Prefix | When to use
------ | ------ | ------ | -----------
-1 | LogFatal | FTL | A critical or otherwise unrecoverable error that halts execution.
-2 | LogError | ERR | A high-severity logic failure, but execution can continue.
-3 | LogWarning | WRN | User-error, or other non-breaking issues.
-4 | LogInfo | INF | General status updates and runtime milestones.
-5 | LogDebug | DBG | Code paths and state changes during active development.
-6 | LogVerbose | VRB | High-frequency data or raw calculations.
-
-By default, the minimum log level is set to `INF`.
-
-### Information rich
-
-LibLog-1.0 automatically adds some helpful information to the log message. Each log is prefexed with:
-
-1. The severity level.
-2. The name of the calling addon.
-
-Additionally, messages with a DBG or VRB severity are also prefixed with the current timestamp, including milliseconds.
-
-### Color coding
-
-LibLog-1.0 formats messages using automatic color coding to make different severities visually distinctive, additionally, log contents are also automatically
-color coded based on their value type.
-
-### Table destructuring
-
-LibLog-1.0 is able to automatically destructure tables (up to 5 levels deep). Tables are colorized to increase readability in the chat window.
-
-### Callback functions
-
-Some logs may require complex logic to be performed which is only used for a log message, if then that log is filtered out because of severity level, all that
-computational power has gone to waste.
-
-All log methods support a callback function which is executed on-demand, and can be used to create logs that need to perform heavy calculations. This ensures
-that during normal gameplay performance is not affected by these logs.
-
-### Configurable
-
-LibLog-1.0 seamlessly integrates with AceConfig-3.0 which allows you to create a configuration option for the log level.
-
-### Custom sinks
-
-Custom sinks allow you to receive a callback when a message is logged, this allows you to create your own log stream.
+* Simple logging API with well-known levels such as `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `FATAL`
+* Configurable minimum logging levels, either globally, or per-addon
+* Support for custom sinks, to capture and process logs in real-time
+* And more...
 
 ## Getting started
 
-To use this library, you need to embed it into your addon. This can be done automatically if you use AceAddon-3.0, or manually using LibStub.
+Like many other libraries, LibLog-1.0 must be embedded within your addon. When using AceAddon-3.0, this can be done automatically, otherwise, you can do so
+using LibStub.
 
 ```lua
 -- Option 1, use AceAddon-3.0
 MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibLog-1.0")
 
 -- Option 2, manually use LibStub
+-- NOTE: LibLog-1.0 works best when your addon contains a 'name' property. If you use AceAddon-3.0, this is set automatically.
+-- When manually embedding using LibStub, it's highly recommended to add a 'name' property to your addon object
 MyAddon = {}
 MyAddon.name = "MyAddon"
 LibStub("LibLog-1.0"):Embed(MyAddon)
+
+MyAddon:LogInfo("Hello {name}!", MyAddon.name)
+-- Hello MyAddon!
 ```
 
-> ⚠️ **LibLog-1.0 works best when your addon contains a `name` property. If you use AceAddon-3.0, this happens automatically. When manually embedding using
-LibStub, it's highly recommended to add a `name` property to your addon object.** ⚠️
+### Log levels
 
-### Usage
+LibLog-1.0 implements six severity levels, combined with a minimum level to process log objects.
 
-Once embedded, your addon gains access to several logging functions. They accept any number of arguments of any type. It's recommended to use multiple arguments
-as that powers the color coding system.
+Level | Method | When to use
+----- | ------ | -----------
+1 | LogFatal | A critical or otherwise unrecoverable error that must halt execution.
+2 | LogError | A high-severity logic issue that leaves functionality unavailable or expections broken.
+3 | LogWarning | User-error, or other non-breaking issues.
+4 | LogInfo | General status updates and runtime milestones.
+5 | LogDebug | Code paths and state changes that are useful when determining how something happened.
+6 | LogVerbose | High-frequency, noisy data that is rarely enabled outside of debugging.
+
+By default, the minimum log level is set to `Info`, meaning `Info` and higher levels are processed.
+
+### Configuration
+
+You can override the minimum log level for your addon by using the following functions:
 
 ```lua
-MyAddon:LogInfo("Addon Loaded!", true, 42, { key = "value" })
--- Output: 1761.159 INF MyAddon: Addon Loaded! true 42 { key "value" }
+MyAddon:SetLogLvel(LibLog.LogLevel.VERBOSE)
+MyAddon:GetLogLevel()
 ```
 
-#### Callbacks
-
-Callback functions are accepted by any logging function, as long as it is the only argument provided.
+It's likely also desirable to initialize the logger upon startup, as your configured minimum log level is not persisted by the library — that responsibility is
+for your addon itself. LibLog-1.0 does offer functionality to _mostly_ do it for you.
 
 ```lua
-MyAddon:LogVerbose(function()
-  -- this code will only run if the log level is set to VERBOSE
-  local result = {}
+function MyAddon:OnInitialize()
+	MyAddon.db = LibStub("AceDB-3.0"):New("MyAddonDB")
 
-  for i = 1, GetNumGroupMembers() do
-      table.insert(result, UnitName("party" .. i))
-  end
-
-  return result -- Can return a table or varargs
-end)
+	-- Simply pass in your saved variables table
+    MyAddon:SetLogLevelFromConfigTable(MyAddon.db.global)
+end
 ```
 
-#### AceConfig
-
-You can integrate a log level setting directly into your AceConfig-3.0 options table.
+If using AceConfig-3.0, you can integrate a dropdown to set the log level for your addon directly:
 
 ```lua
 {
 	logLevel = MyAddon:GetLogLevelOptionObject(MyAddon.db.global)
 }
 ```
-
-This allows you to directly pass in your configuration table, which is usually your saved variables. LibLog-1.0 will automatically read from and write to the
-specified configuration table.
-
-You can further control the options object by using a mixin:
 
 ```lua
 {
@@ -159,46 +156,124 @@ You can further control the options object by using a mixin:
 }
 ```
 
-#### Initialization
+If not using AceConfig-3.0, all required properties to build a dropdown youself are publicly available: `LibLog.LogLevel`, `LibLog.CONFIG_KEY`, and of course
+`MyAddon:SetLogLevel` and `MyAddon:GetLogLevel`.
 
-Since your log level is stored in your own saved variables, you must tell LibLog-1.0 to use the correct log level upon load:
+## Advanced configuration
 
-```lua
-function MyAddon:OnInitialize()
-	MyAddon.db = LibStub("AceDB-3.0"):New("MyAddonDB")
+### Callback functions
 
-    MyAddon:SetLogLevelFromConfigTable(MyAddon.db.global)
-end
-```
+Sometimes a log may require complex logic to be performed which is only used for that log, if then that log is filtered out because of severity level, all that
+computational power has gone to waste.
 
-#### Syncing changes
-
-If the log level is changed externally (for example, via a global manager), you can react using the `OnLogLevelChanged` callback. This callback may either
-perform its own syching logic, or simply return your configuration table.
+All log methods support a callback function which is executed on-demand, and can be used to create logs that need to perform heavy calculations. This ensures
+that during normal gameplay performance is not affected by these logs.
 
 ```lua
-function MyAddon:OnLogLevelChanged(level)
-	return MyAddon.db.global
-end
+MyAddon:LogVerbose("Currently in a raid with {members}", function()
+  -- this code will only run if the log level is set to VERBOSE
+  local result = {}
+
+  for i = 1, GetNumGroupMembers() do
+      table.insert(result, UnitName("raid" .. i))
+  end
+
+  return result
+end)
 ```
 
-#### Custom sinks
+### Halting execution
 
-It's possible to register a custom log sink, allowing you to capture all log messages, and recreate the log stream.
+The fatal log level is a bit special, it behaves just like a regular log would, however it will also show up in BugSack as a captured error. This ensures that
+execution is halted, just like a regular `error(...)` would.
+
+All log functions return an `unknown` value, for the sole purpose of being able to immediately return after the log. Since LuaLS or the likes doesn't know that
+`LogFatal` does not return, it may be desirable to `return MyAddon:LogFatal(...)`.
+
+### Additional properties
+
+You can also add extra properties to a log object, these are only included in the `properties` table, and not visible within the message itself. It's also
+possible to push a callback function as property, these will be evaluated on-demand with every log, allowing you to capture up-to-date information.
 
 ```lua
---- @param addon? string The name of the addon that sent the log message
---- @param level LogLevel The log severity
---- @param prefix string The prefix generated by the logging system.
---- @param message string The fully constructed message, including destructured values and color codes.
-local function MyLogSink(addon, level, prefix, message)
-	print(prefix .. " " .. message)
-end
-
-LibLog:RegisterSink(MyLogSink)
+MyAddon:PushLogProperty("extra", 41)
+MyAddon:PushLogProperty("anotherProperty", function()
+	return UnitHealth("player")
+end)
 ```
 
-## External integrations
+After pushing a property, all logs your addon produces will contain the value of that property, until popped.
 
-The [LogManager](https://github.com/Snakybo/LogManager) addon is an example of an external log level manager. It's able to manage both the global minimum
-logging level, as well as per-addon settings.
+```lua
+MyAddon:PopLogProperty("extra", "anotherProperty")
+```
+
+You can also use closures to automatically manage pushing and popping properties:
+
+```lua
+MyAddon:WithLogContext({ extra = 41, anotherProperty = function() return UnitHealth("player") end }, function()
+	MyAddon:LogInfo("This log will have additional properties")
+
+	-- <logic>
+
+	MyAddon:LogVerbose("This log will still have additional properties")
+end)
+```
+
+## Formatting
+
+LibLog-1.0 (currently) implements a an opinionated color scheme for log levels and value types, and a format for destructured tables.
+
+The format of destructured tables is also intended to make use of color as a seperator and thus leave out excess data. At its most basic level, a destructured
+table will look like this:
+
+```txt
+{ key value }
+
+{ 1 value 2 value 3 value 4 value }
+
+{ key { key2 { key3 value } } }
+```
+
+## Custom sinks
+
+And finally, the primary reason LibLog-1.0 exists, custom sinks to process log objects.
+
+To register a custom sink, use the following function:
+
+```lua
+--- @param message LibLog-1.0.LogMessage
+local function OnLogReceived(message)
+	print(message.message)
+end
+
+LibLog:RegisterSink("MyLogSink", OnLogReceived)
+```
+
+The `LibLog-1.0.LogMessage` message object contains all relevant information for the log message, including the value of each individial property.
+
+```lua
+{
+  message = "My character name is Arthas on realm Frostmourne",
+  addon = "MyAddon",
+  level = 4,
+  time = 1771420921,
+  sequenceId = 1,
+  properties = {
+    charName = "Arthas",
+    realmName = "Frostmourne"
+  }
+}
+```
+
+You can also enable or disable registered sinks:
+
+```lua
+LibLog:EnableSink("MyLogSink")
+LibLog:DisableSink("MyLogSink")
+```
+
+### Available sinks
+
+* [LogSink: Table](https://github.com/Snakybo/LogSink-Table)
+* [LogSink: SavedVariables](https://github.com/Snakybo/LogSink-SavedVariables)

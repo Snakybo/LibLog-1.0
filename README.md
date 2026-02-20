@@ -110,12 +110,12 @@ LibLog-1.0 implements six severity levels, combined with a minimum level to proc
 
 Level | Method | When to use
 ----- | ------ | -----------
-1 | LogFatal | A critical or otherwise unrecoverable error that must halt execution.
-2 | LogError | A high-severity logic issue that leaves functionality unavailable or expections broken.
-3 | LogWarning | User-error, or other non-breaking issues.
-4 | LogInfo | General status updates and runtime milestones.
-5 | LogDebug | Code paths and state changes that are useful when determining how something happened.
-6 | LogVerbose | High-frequency, noisy data that is rarely enabled outside of debugging.
+6 | LogFatal | A critical or otherwise unrecoverable error that must halt execution.
+5 | LogError | A high-severity logic issue that leaves functionality unavailable or expections broken.
+4 | LogWarning | User-error, or other non-breaking issues.
+3 | LogInfo | General status updates and runtime milestones.
+2 | LogDebug | Code paths and state changes that are useful when determining how something happened.
+1 | LogVerbose | High-frequency, noisy data that is rarely enabled outside of debugging.
 
 By default, the minimum log level is set to `Info`, meaning `Info` and higher levels are processed.
 

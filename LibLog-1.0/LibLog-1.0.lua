@@ -46,7 +46,7 @@ end
 --- @field public isCallback boolean Whether the `value` is a `function`.
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 7)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 8)
 if LibLog == nil then
 	return
 end
@@ -152,6 +152,42 @@ local function ReleaseCachedTable(tbl)
 	tableCache[tbl] = true
 end
 
+--- @generic T
+--- @param value T
+--- @param seen? table<T, T>
+--- @return T
+local function DeepCopy(value, seen)
+	if type(value) ~= "table" then
+		return value
+	end
+
+	if value.GetObjectType ~= nil then
+		return tostring(value)
+	end
+
+	local root = seen == nil
+	seen = seen or AcquireCachedTable()
+
+	if seen[value] then
+		return seen[value]
+	end
+
+	local result = {}
+	seen[value] = result
+
+	for k, v in pairs(value) do
+		local copyK = DeepCopy(k, seen)
+		local copyV = DeepCopy(v, seen)
+		result[copyK] = copyV
+	end
+
+	if root then
+		ReleaseCachedTable(seen)
+	end
+
+	return result
+end
+
 --- @param template string
 --- @return LibLog-1.0.MessageTemplate
 local function GetMessageTemplate(template)
@@ -186,7 +222,7 @@ local function PackVarargs(...)
 	local result = AcquireCachedTable()
 
 	for i = 1, count do
-		result[i] = select(i, ...)
+		result[i] = DeepCopy(select(i, ...))
 	end
 
 	return count, result
@@ -350,10 +386,10 @@ local function PopulateMessageProperties(addon, message, values)
 				local success, value = xpcall(v.value, ErrorHandler)
 
 				if success then
-					result[v.name] = value
+					result[v.name] = DeepCopy(value)
 				end
 			else
-				result[v.name] = v.value
+				result[v.name] = DeepCopy(v.value)
 			end
 		end
 	end

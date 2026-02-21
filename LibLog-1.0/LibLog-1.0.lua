@@ -166,6 +166,8 @@ local function GetMessageTemplate(template)
 		properties = {}
 	}
 
+	template = string.gsub(template, "%%", "%%%%")
+
 	result.message = string.gsub(template, "{(.-)}", function(key)
 		table.insert(result.properties, key)
 		return "%s"

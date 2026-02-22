@@ -46,7 +46,7 @@ end
 --- @field public isCallback boolean Whether the `value` is a `function`.
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 8)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 9)
 if LibLog == nil then
 	return
 end
@@ -645,7 +645,7 @@ function LibLog:EnableSink(name)
 	local sink = LibLog.sinks[name]
 
 	if sink ~= nil then
-		sink.enabled = false
+		sink.enabled = true
 	end
 end
 

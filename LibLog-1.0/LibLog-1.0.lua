@@ -26,6 +26,7 @@ end
 
 --- @class LibLog-1.0.LogMessage
 --- @field public message string The human-readable log string.
+--- @field public template string The unprocessed message template.
 --- @field public level LibLog-1.0.LogLevel The (numeric) level of the log. Can be compared against `LibLog.LogLevel`, or stringified using `LibLog.labels`.
 --- @field public addon? string The name of the source addon.
 --- @field public time integer The number of seconds that have elapsed since the Unix epoch.
@@ -33,27 +34,27 @@ end
 --- @field public properties table<string, unknown> All properties that have been extracted from the template string or manually injected.
 
 --- @class LibLog-1.0.Sink
+--- @field public OnLogMessageReceived fun(message: LibLog-1.0.LogMessage)
+
+--- @class LibLog-1.0.SinkConfiguration
 --- @field public callback fun(message: LibLog-1.0.LogMessage)
+--- @field public obj? table
 --- @field public enabled boolean
 
 --- @class LibLog-1.0.MessageTemplate
---- @field public message string The parsed template string, where the named parameters have been replaced to conform with `string.format`.
---- @field public properties string[] The named parameters found within the template string.
+--- @field public format string
+--- @field public properties string[]
 
 --- @class LibLog-1.0.Property
---- @field public name string The name of the parameter.
---- @field public value unknown The raw value.
---- @field public isCallback boolean Whether the `value` is a `function`.
+--- @field public name string
+--- @field public value unknown
+--- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 10)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 11)
 if LibLog == nil then
 	return
 end
-
---- @class LibLog-1.0.Logger
---- @field public name? string The name of the addon logs will be attributed to.
-local Logger = {}
 
 --- @enum LibLog-1.0.LogLevel
 LibLog.LogLevel = {
@@ -75,7 +76,34 @@ LibLog.labels = {
 	[LibLog.LogLevel.FATAL] = "FTL"
 }
 
-LibLog.colorScheme = {
+LibLog.configKey = "logLevel"
+
+--- @private
+--- @type table<table, boolean>
+LibLog.embeds = LibLog.embeds or {}
+
+--- @private
+--- @type table<string, LibLog-1.0.LogLevel>
+LibLog.levels = LibLog.levels or {}
+
+--- @private
+--- @type table<string, LibLog-1.0.SinkConfiguration>
+LibLog.sinks = LibLog.sinks or {}
+
+--- @private
+--- @type table<string, table<string, LibLog-1.0.Property>>
+LibLog.properties = LibLog.properties or {}
+
+--- @private
+LibLog.currentTime = LibLog.currentTime or 0
+
+--- @private
+LibLog.currentSequenceId = LibLog.currentSequenceId or 1
+
+--- @class LibLog-1.0.ChatFrameSink : LibLog-1.0.Sink
+local ChatFrameSink = {}
+
+ChatFrameSink.COLOR_SCHEME = {
 	[LibLog.LogLevel.VERBOSE] = "ff6e6e6e",
 	[LibLog.LogLevel.DEBUG] = "ffa1a1a1",
 	[LibLog.LogLevel.INFO] = "ff00dfff",
@@ -91,29 +119,9 @@ LibLog.colorScheme = {
 	["event"] = "ffbd93f9",
 }
 
-LibLog.configKey = "logLevel"
-
---- @private
---- @type table<table, boolean>
-LibLog.embeds = LibLog.embeds or {}
-
---- @private
---- @type table<string, LibLog-1.0.LogLevel>
-LibLog.levels = LibLog.levels or {}
-
---- @private
---- @type table<string, LibLog-1.0.Sink>
-LibLog.sinks = LibLog.sinks or {}
-
---- @private
---- @type table<string, table<string, LibLog-1.0.Property>>
-LibLog.properties = LibLog.properties or {}
-
---- @private
-LibLog.currentTime = LibLog.currentTime or 0
-
--- @private
-LibLog.currentSequenceId = LibLog.currentSequenceId or 1
+--- @class LibLog-1.0.Logger
+--- @field public name? string The name of the addon logs will be attributed to.
+local Logger = {}
 
 local L = {
 	level = "Log level",
@@ -191,6 +199,61 @@ local function DeepCopy(value, seen)
 	return result
 end
 
+--- @param template LibLog-1.0.MessageTemplate
+--- @param values unknown[]
+--- @return string
+local function CreateMessage(template, values)
+	--- @param current unknown
+	--- @param visited table<table, boolean>
+	--- @param escape? boolean
+	--- @return string
+	local function Serialize(current, visited, escape)
+		if type(current) == "table" then
+			if visited[current] then
+				return "<circular reference>"
+			end
+
+			local result = AcquireCachedTable()
+			table.insert(result, "{")
+
+			visited[current] = true
+
+			for k, v in pairs(current) do
+				table.insert(result, type(k) == "string" and k or "[" .. tostring(k) .. "]")
+				table.insert(result, "=")
+				table.insert(result, Serialize(v, visited, true) .. ",")
+			end
+
+			visited[current] = false
+
+			table.insert(result, "}")
+
+			current = table.concat(result, " ")
+			ReleaseCachedTable(result)
+
+			return current
+		elseif escape and type(current) == "string" then
+			return string.format("%q", current)
+		end
+
+		return tostring(current)
+	end
+
+	local result = AcquireCachedTable()
+	local visited = AcquireCachedTable()
+
+	for i = 1, #template.properties do
+		result[i] = Serialize(values[i], visited)
+	end
+
+	local message = string.format(template.format, unpack(result))
+
+	ReleaseCachedTable(visited)
+	ReleaseCachedTable(result)
+
+	return message
+end
+
 --- @param template string
 --- @return LibLog-1.0.MessageTemplate
 local function GetMessageTemplate(template)
@@ -201,13 +264,13 @@ local function GetMessageTemplate(template)
 
 	result = {
 		--- @diagnostic disable-next-line: assign-type-mismatch
-		message = nil,
+		format = nil,
 		properties = {}
 	}
 
 	template = string.gsub(template, "%%", "%%%%")
 
-	result.message = string.gsub(template, "{(.-)}", function(key)
+	result.format = string.gsub(template, "{(.-)}", function(key)
 		table.insert(result.properties, key)
 		return "%s"
 	end)
@@ -255,126 +318,11 @@ local function GetValues(...)
 	return 0, AcquireCachedTable()
 end
 
---- @param message LibLog-1.0.LogMessage
-local function ChatFrameSink(message)
-	local frame = DEFAULT_CHAT_FRAME
-
-	--- @type string[]
-	local prefix
-
-	if message.level <= LibLog.LogLevel.DEBUG then
-		prefix = {
-			"|c",
-			LibLog.colorScheme[message.level],
-			date("%H:%M:%S", message.time) --[[@as string]],
-			" ",
-			LibLog.labels[message.level],
-			" ",
-			message.addon,
-			":",
-			"|r"
-		}
-	else
-		prefix = {
-			"|c",
-			LibLog.colorScheme[message.level],
-			LibLog.labels[message.level],
-			" ",
-			message.addon,
-			":",
-			"|r"
-		}
-	end
-
-	if frame then
-		frame:AddMessage(table.concat(prefix, "") .. " " .. message.message)
-	end
-end
-
---- @param string string
---- @param color string
---- @return string
-local function Colorize(string, color)
-	return "|c" .. color .. string .. "|r"
-end
-
---- @param value unknown
---- @return string
-local function ColorizeValue(value)
-	local valueType = type(value)
-
-	if valueType == "string" and C_EventUtils.IsEventValid(value) then
-		return Colorize(value, LibLog.colorScheme["event"])
-	end
-
-	local color = LibLog.colorScheme[valueType] or LibLog.colorScheme["string"]
-	return Colorize(tostring(value), color)
-end
-
---- @param value unknown
---- @return string
-local function Destructure(value)
-	local T_COLOR = LibLog.colorScheme["table"]
-	local K_COLOR = LibLog.colorScheme["tableKey"]
-
-	local MAX_DEPTH = 5
-
-	--- @type table<table, boolean>
-	local visited = AcquireCachedTable()
-
-	--- @param o unknown
-	--- @param depth integer
-	--- @return string
-	local function DestructureImpl(o, depth)
-		if depth >= MAX_DEPTH or type(o) ~= "table" or visited[o] then
-			return ColorizeValue(o)
-		end
-
-		--- @type string[]
-		local buffer = AcquireCachedTable()
-		local first = true
-
-		visited[o] = true
-
-		for k, v in pairs(o) do
-			local destructured = DestructureImpl(v, depth + 1)
-
-			if destructured ~= nil then
-				table.insert(buffer, Colorize(tostring(k), K_COLOR))
-				table.insert(buffer, destructured)
-
-				first = false
-			end
-		end
-
-		visited[o] = nil
-
-		if first then
-			ReleaseCachedTable(buffer)
-			return Colorize("{}", T_COLOR)
-		end
-
-		table.insert(buffer, 1, Colorize("{", T_COLOR))
-		table.insert(buffer, Colorize("}", T_COLOR))
-
-		local result = table.concat(buffer, " ")
-
-		ReleaseCachedTable(buffer)
-
-		return result
-	end
-
-	local result = DestructureImpl(value, 1)
-
-	ReleaseCachedTable(visited)
-	return result
-end
-
 --- @param addon? string
---- @param message LibLog-1.0.MessageTemplate
+--- @param template LibLog-1.0.MessageTemplate
 --- @param values unknown[]
 --- @return table<string, unknown>
-local function PopulateMessageProperties(addon, message, values)
+local function PopulateMessageProperties(addon, template, values)
 	if addon == nil then
 		return {}
 	end
@@ -397,8 +345,8 @@ local function PopulateMessageProperties(addon, message, values)
 		end
 	end
 
-	for i = 1, #message.properties do
-		result[message.properties[i]] = values[i]
+	for i = 1, #template.properties do
+		result[template.properties[i]] = values[i]
 	end
 
 	return result
@@ -415,6 +363,125 @@ local function IsLogLevelEnabled(name, level)
 	end
 
 	return level >= minLogLevel
+end
+
+--- @param message LibLog-1.0.LogMessage
+function ChatFrameSink:OnLogMessageReceived(message)
+	local frame = DEFAULT_CHAT_FRAME
+
+	--- @type string[]
+	local prefix
+
+	if message.level <= LibLog.LogLevel.DEBUG then
+		prefix = {
+			"|c",
+			self.COLOR_SCHEME[message.level],
+			date("%H:%M:%S", message.time) --[[@as string]],
+			" ",
+			LibLog.labels[message.level],
+			" ",
+			message.addon,
+			":",
+			"|r"
+		}
+	else
+		prefix = {
+			"|c",
+			self.COLOR_SCHEME[message.level],
+			LibLog.labels[message.level],
+			" ",
+			message.addon,
+			":",
+			"|r"
+		}
+	end
+
+	if frame then
+		frame:AddMessage(table.concat(prefix, "") .. " " .. self:CreateMessage(message))
+	end
+end
+
+--- @param message LibLog-1.0.LogMessage
+function ChatFrameSink:CreateMessage(message)
+	local format, properties = LibLog:GetFormat(message.template)
+	local values = AcquireCachedTable()
+
+	for i = 1, #properties do
+		local key = properties[i]
+		values[i] = self:Serialize(message.properties[key])
+	end
+
+	local result = string.format(format, unpack(values))
+	ReleaseCachedTable(values)
+
+	return result
+end
+
+--- @private
+--- @param value unknown
+--- @return string
+function ChatFrameSink:Serialize(value)
+	local TABLE_COLOR = self.COLOR_SCHEME["table"]
+	local TABLE_KEY_COLOR = self.COLOR_SCHEME["tableKey"]
+	local STRING_COLOR = self.COLOR_SCHEME["string"]
+
+	--- @param current unknown
+	--- @param visited table<table, boolean>
+	--- @param escape? boolean
+	--- @return string
+	local function Serialize(current, visited, escape)
+		local valueType = type(current)
+		local color = valueType --[[@as string]]
+
+		if valueType == "table" then
+			if visited[current] then
+				return self:Colorize("<circular reference>", TABLE_COLOR)
+			end
+
+			local result = AcquireCachedTable()
+			table.insert(result, self:Colorize("{", TABLE_COLOR))
+
+			visited[current] = true
+
+			for k, v in pairs(current) do
+				table.insert(result, self:Colorize(type(k) == "string" and k or "[" .. tostring(k) .. "]", TABLE_KEY_COLOR))
+				table.insert(result, self:Colorize("=", TABLE_COLOR))
+				table.insert(result, Serialize(v, visited, true) .. ",")
+			end
+
+			visited[current] = false
+
+			table.insert(result, self:Colorize("}", TABLE_COLOR))
+
+			current = table.concat(result, " ")
+			ReleaseCachedTable(result)
+		elseif valueType == "string" then
+			if escape then
+				current = string.format("%q", current)
+			end
+
+			if C_EventUtils.IsEventValid(current) then
+				color = "event"
+			end
+		end
+
+		return self:Colorize(tostring(current), self.COLOR_SCHEME[color] or STRING_COLOR)
+	end
+
+	local visited = AcquireCachedTable()
+	local result = Serialize(value, visited)
+
+	ReleaseCachedTable(visited)
+
+	return result
+end
+
+--- @private
+--- @param string string
+--- @param color string
+--- @return string
+function ChatFrameSink:Colorize(string, color)
+	return "|c" .. color .. string .. "|r"
 end
 
 --- Log a VRB message. Verbose logs should be used for high-frequency logs or low-level data. For example, raw calculations or other raw data.
@@ -644,14 +711,24 @@ end
 --- Register an external sink to replicate the logging stream.
 ---
 --- @param name string
---- @param callback fun(message: LibLog-1.0.LogMessage)
+--- @param callback fun(message: LibLog-1.0.LogMessage)|LibLog-1.0.Sink
 function LibLog:RegisterSink(name, callback)
-	assert(type(callback) == "function", "Cannot register a non-function log sink")
+	if type(callback) == "function" then
+		self.sinks[name] = {
+			callback = callback,
+			enabled = true
+		}
+	elseif type(callback) == "table" then
+		assert(type(callback.OnLogMessageReceived) == "function", "Cannot register a sink without an OnLogMessageReceived function")
 
-	self.sinks[name] = {
-		callback = callback,
-		enabled = true
-	}
+		self.sinks[name] = {
+			callback = callback.OnLogMessageReceived,
+			obj = callback,
+			enabled = true
+		}
+	else
+		error("Cannot register a sink that is not a function, or a table containing an 'OnLogMessageReceived' function")
+	end
 end
 
 --- Enable a sink.
@@ -708,6 +785,14 @@ function LibLog:Embed(target)
 	return target
 end
 
+--- @param template string
+--- @return string format
+--- @return string[] properties
+function LibLog:GetFormat(template)
+	local templateObj = GetMessageTemplate(template)
+	return templateObj.format, templateObj.properties
+end
+
 --- @private
 --- @param addon? string The name of the addon.
 --- @param level LibLog-1.0.LogLevel The log level to log with.
@@ -722,16 +807,9 @@ function LibLog:Log(addon, level, template, ...)
 		return nil
 	end
 
-	local message = GetMessageTemplate(template)
-	local properties = AcquireCachedTable() --[[@as string[] ]]
+	local templateObj = GetMessageTemplate(template)
 	local _, values = GetValues(...)
-
-	for i = 1, #message.properties do
-		local value = values[i]
-		properties[i] = Destructure(value)
-	end
-
-	local parsedMessage = string.format(message.message, unpack(properties))
+	local message = CreateMessage(templateObj, values)
 
 	if isAllowed then
 		local now = time()
@@ -745,28 +823,30 @@ function LibLog:Log(addon, level, template, ...)
 
 		--- @type LibLog-1.0.LogMessage
 		local result = {
-			message = parsedMessage,
+			message = message,
+			template = template,
 			addon = addon,
 			level = level,
 			time = self.currentTime,
 			sequenceId = self.currentSequenceId,
-			properties = PopulateMessageProperties(addon, message, values)
+			properties = PopulateMessageProperties(addon, templateObj, values)
 		}
-
-		ChatFrameSink(result)
 
 		for _, sink in pairs(self.sinks) do
 			if sink.enabled then
-				xpcall(sink.callback, ErrorHandler, result)
+				if sink.obj ~= nil then
+					xpcall(sink.callback, ErrorHandler, sink.obj, result)
+				else
+					xpcall(sink.callback, ErrorHandler, result)
+				end
 			end
 		end
 	end
 
 	ReleaseCachedTable(values)
-	ReleaseCachedTable(properties)
 
 	if isFatal then
-		error(parsedMessage, 3)
+		error(message, 3)
 	end
 
 	return nil
@@ -779,28 +859,33 @@ function LibLog:TestSuite()
 		name = "TestSuite"
 	})
 
-    Addon:SetLogLevel(self.LogLevel.INFO)
-    Addon:LogVerbose("HIDDEN: Verbose")
-    Addon:LogDebug("HIDDEN: Debug")
-    Addon:LogInfo("VISIBLE: Info")
-    Addon:LogWarning("VISIBLE: Warning")
+	Addon:SetLogLevel(self.LogLevel.INFO)
+	Addon:LogVerbose("HIDDEN: Verbose")
+	Addon:LogDebug("HIDDEN: Debug")
+	Addon:LogInfo("VISIBLE: Info")
+	Addon:LogWarning("VISIBLE: Warning")
 
-    Addon:LogInfo("string={stringValue}, number={numberValue}, boolean={booleanValue}, nil={nilValue}, plain text", "string", 123.456, true, nil)
-    Addon:LogInfo("Complex: {complexTable}", {
-        sub = { a = 1, b = { "deep" } },
-        empty = {},
-        list = { 10, nil, 30 }
-    })
-    Addon:LogInfo("Empty Top-Level: {emptyTable}", {})
+	Addon:LogInfo("string={stringValue}, number={numberValue}, boolean={booleanValue}, nil={nilValue}, plain text", "string", 123.456, true, nil)
+	Addon:LogInfo("Complex: {complexTable}", {
+		sub = { a = 1, b = { "deep" } },
+		empty = {},
+		list = { 10, nil, 30 }
+	})
+	Addon:LogInfo("Empty Top-Level: {emptyTable}", {})
 
-    local circular = { name = "Self" }
-    circular.child = circular
-    Addon:LogInfo("Circular: {circularTable}", circular)
-	Addon:LogInfo("Too deep: {tooDeepTable}", { two = { three = { four = { five = { six = { "test" }}}}}})
+	local circular = { name = "Self" }
+	circular.child = circular
+	Addon:LogInfo("Circular: {circularTable}", circular)
+
+	local sameTableRef = { name = "Self" }
+	Addon:LogInfo("References the same table: {sameTableRef}", { t1 = sameTableRef, t2 = sameTableRef })
+
+	Addon:LogInfo("Deep: {deepTable}", { two = { three = { four = { five = { six = { "test" }}}}}})
 
 	Addon:LogInfo("{player} is {online} with {hp} HP", "Arthas", true, 50.5)
 	Addon:LogInfo("With more parameters than arguments: {player} is {online} with {hp} HP", "Arthas")
 	Addon:LogInfo("With more arguments than parameters: {player} is {online} with {hp} HP", "Arthas", true, 50.5, "extra", 0.2, true)
+
 	Addon:LogInfo("{cpu} at {time}", function()
 		return "0.01ms", GetTime()
 	end)
@@ -825,3 +910,5 @@ end
 for target in pairs(LibLog.embeds) do
 	LibLog:Embed(target)
 end
+
+LibLog:RegisterSink("BuiltIn", ChatFrameSink)

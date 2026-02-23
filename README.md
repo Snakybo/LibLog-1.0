@@ -62,7 +62,7 @@ properties.
   properties = {
     name = "Thrall",
     eventName = "UNIT_SPELLCAST_SUCCEEDED",
-	spellName = "Bloodlust"
+    spellName = "Bloodlust"
   }
 },
 {
@@ -70,7 +70,7 @@ properties.
   properties = {
     name = "Khadgar",
     eventName = "UNIT_SPELLCAST_SUCCEEDED",
-	spellName = "Blink"
+    spellName = "Blink"
   }
 }
 ```
@@ -133,10 +133,10 @@ for your addon itself. LibLog-1.0 does offer functionality to _mostly_ do it for
 
 ```lua
 function MyAddon:OnInitialize()
-	MyAddon.db = LibStub("AceDB-3.0"):New("MyAddonDB")
+  MyAddon.db = LibStub("AceDB-3.0"):New("MyAddonDB")
 
-	-- Simply pass in your saved variables table
-    MyAddon:SetLogLevelFromConfigTable(MyAddon.db.global)
+  -- Simply pass in your saved variables table
+  MyAddon:SetLogLevelFromConfigTable(MyAddon.db.global)
 end
 ```
 
@@ -144,15 +144,15 @@ If using AceConfig-3.0, you can integrate a dropdown to set the log level for yo
 
 ```lua
 {
-	logLevel = MyAddon:GetLogLevelOptionObject(MyAddon.db.global)
+  logLevel = MyAddon:GetLogLevelOptionObject(MyAddon.db.global)
 }
 ```
 
 ```lua
 {
-	logLevel = Mixin(MyAddon:GetLogLevelOptionObject(MyAddon.db.global), {
-		order = 10
-	})
+  logLevel = Mixin(MyAddon:GetLogLevelOptionObject(MyAddon.db.global), {
+    order = 10
+  })
 }
 ```
 
@@ -175,7 +175,7 @@ MyAddon:LogVerbose("Currently in a raid with {members}", function()
   local result = {}
 
   for i = 1, GetNumGroupMembers() do
-      table.insert(result, UnitName("raid" .. i))
+    table.insert(result, UnitName("raid" .. i))
   end
 
   return result
@@ -189,7 +189,7 @@ if MyAddon:IsLogLevelEnabled(LibLog.LogLevel.DEBUG) then
   local members = {}
 
   for i = 1, GetNumGroupMembers() do
-      table.insert(members, UnitName("raid" .. i))
+    table.insert(members, UnitName("raid" .. i))
   end
 
   MyAddon:LogDebug("Currently in a raid with {members}", members)
@@ -212,7 +212,7 @@ possible to push a callback function as property, these will be evaluated on-dem
 ```lua
 MyAddon:PushLogProperty("extra", 41)
 MyAddon:PushLogProperty("anotherProperty", function()
-	return UnitHealth("player")
+  return UnitHealth("player")
 end)
 ```
 
@@ -226,27 +226,12 @@ You can also use closures to automatically manage pushing and popping properties
 
 ```lua
 MyAddon:WithLogContext({ extra = 41, anotherProperty = function() return UnitHealth("player") end }, function()
-	MyAddon:LogInfo("This log will have additional properties")
+  MyAddon:LogInfo("This log will have additional properties")
 
-	-- <logic>
+  -- <logic>
 
-	MyAddon:LogVerbose("This log will still have additional properties")
+  MyAddon:LogVerbose("This log will still have additional properties")
 end)
-```
-
-## Formatting
-
-LibLog-1.0 (currently) implements a an opinionated color scheme for log levels and value types, and a format for destructured tables.
-
-The format of destructured tables is also intended to make use of color as a seperator and thus leave out excess data. At its most basic level, a destructured
-table will look like this:
-
-```txt
-{ key value }
-
-{ 1 value 2 value 3 value 4 value }
-
-{ key { key2 { key3 value } } }
 ```
 
 ## Custom sinks
@@ -257,11 +242,25 @@ To register a custom sink, use the following function:
 
 ```lua
 --- @param message LibLog-1.0.LogMessage
-local function OnLogReceived(message)
-	print(message.message)
+local function OnLogMessageReceived(message)
+  print(message.message)
 end
 
-LibLog:RegisterSink("MyLogSink", OnLogReceived)
+LibLog:RegisterSink("MyLogSink", OnLogMessageReceived)
+```
+
+You can also pass in an object that contains a `OnLogMessageReceived` function:
+
+```lua
+--- @class MySink : LibLog-1.0.Sink
+local MySink = {}
+
+--- @param message LibLog-1.0.LogMessage
+function MySink:OnLogMessageReceived(message)
+  print(message.message)
+end
+
+LibLog:RegisterSink("MyLogSink", MySink)
 ```
 
 The `LibLog-1.0.LogMessage` message object contains all relevant information for the log message, including the value of each individial property.
@@ -269,6 +268,7 @@ The `LibLog-1.0.LogMessage` message object contains all relevant information for
 ```lua
 {
   message = "My character name is Arthas on realm Frostmourne",
+  template = "My character name is {charName} on realm {realmName}",
   addon = "MyAddon",
   level = 4,
   time = 1771420921,

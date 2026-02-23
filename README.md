@@ -182,6 +182,20 @@ MyAddon:LogVerbose("Currently in a raid with {members}", function()
 end)
 ```
 
+Alternatively, you can use `IsLogLevelEnabled` to check whether logging should occur.
+
+```lua
+if MyAddon:IsLogLevelEnabled(LibLog.LogLevel.DEBUG) then
+  local members = {}
+
+  for i = 1, GetNumGroupMembers() do
+      table.insert(members, UnitName("raid" .. i))
+  end
+
+  MyAddon:LogDebug("Currently in a raid with {members}", members)
+end
+```
+
 ### Halting execution
 
 The fatal log level is a bit special, it behaves just like a regular log would, however it will also show up in BugSack as a captured error. This ensures that

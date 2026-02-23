@@ -46,7 +46,7 @@ end
 --- @field public isCallback boolean Whether the `value` is a `function`.
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 9)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 10)
 if LibLog == nil then
 	return
 end
@@ -109,6 +109,12 @@ LibLog.sinks = LibLog.sinks or {}
 --- @type table<string, table<string, LibLog-1.0.Property>>
 LibLog.properties = LibLog.properties or {}
 
+--- @private
+LibLog.currentTime = LibLog.currentTime or 0
+
+-- @private
+LibLog.currentSequenceId = LibLog.currentSequenceId or 1
+
 local L = {
 	level = "Log level",
 	level_desc = "Select the logging level for this addon. Select 'NONE' to completely disable logging.\n\nLower values mean more messages get logged, where 'VERBOSE' logs everything."
@@ -122,9 +128,6 @@ local templateCache = {}
 
 --- @type table<table, boolean>
 local tableCache = {}
-
-local currentTime = 0
-local currentSequenceId = 1
 
 --- @param err any
 --- @return function
@@ -404,7 +407,7 @@ end
 --- @param name? string
 --- @param level LibLog-1.0.LogLevel
 --- @return boolean
-local function IsLogAllowed(name, level)
+local function IsLogLevelEnabled(name, level)
 	local addonLevel = LibLog.levels[name]
 
 	if addonLevel ~= nil then
@@ -529,7 +532,8 @@ function Logger:PopLogProperty(...)
 	end
 end
 
---- Create a closure where all logs contain the given properties.
+--- Create a closure where all logs contain the given properties. This is useful when you don't want to deal with popping properties manually, as that can be
+--- error-prone.
 ---
 --- @param properties table<string, unknown>
 --- @param closure fun()
@@ -549,22 +553,32 @@ function Logger:WithLogContext(properties, closure)
 	end
 end
 
---- Set the log level for the given addon.
+--- Check if the given log level is currently enabled.
 ---
---- This will invoke a callback function on the addon to notify its log level has changed, allowing the addon to maintain its own saved variables.
+--- This will always return `true` for the FTL log level.
+---
+--- @param level LibLog-1.0.LogLevel
+--- @return boolean
+function Logger:IsLogLevelEnabled(level)
+	if not IsLogLevelEnabled(self.name, level) then
+		return level >= LibLog.LogLevel.FATAL
+	end
+
+	return true
+end
+
+--- Set the minimum log level, any logs with a level lower than the given value will be ignored.
 ---
 --- @param level? LibLog-1.0.LogLevel The log level to set.
-function Logger:SetLogLevel(level, addon)
-	--- @diagnostic disable-next-line: undefined-field
-	addon = addon or self.name
-	if addon == nil then
+function Logger:SetLogLevel(level)
+	if self.name == nil then
 		return
 	end
 
-	LibLog.levels[addon] = level
+	LibLog.levels[self.name] = level
 end
 
---- Set the log level for the given addon using a configuration table.
+--- Set the log level using a configuration table.
 ---
 --- @param configTable table A configuration table to retrieve the current log level from, usually your saved variables.
 function Logger:SetLogLevelFromConfigTable(configTable)
@@ -579,12 +593,14 @@ function Logger:SetLogLevelFromConfigTable(configTable)
 	end
 end
 
---- Get the current log level for the given addon.
+--- Get the current log level.
+---
+--- @return LibLog-1.0.LogLevel
 function Logger:GetLogLevel()
 	return LibLog.levels[self.name] or minLogLevel
 end
 
---- Create an AceGUI option table which can manipulate the log level of the given addon.
+--- Create an AceGUI option table which can manipulate the log level.
 ---
 --- @param configTable table A configuration table to store and retrieve current log level values from, usually your saved variables.
 function Logger:GetLogLevelOptionObject(configTable)
@@ -632,7 +648,7 @@ end
 function LibLog:RegisterSink(name, callback)
 	assert(type(callback) == "function", "Cannot register a non-function log sink")
 
-	LibLog.sinks[name] = {
+	self.sinks[name] = {
 		callback = callback,
 		enabled = true
 	}
@@ -642,7 +658,7 @@ end
 ---
 --- @param name string
 function LibLog:EnableSink(name)
-	local sink = LibLog.sinks[name]
+	local sink = self.sinks[name]
 
 	if sink ~= nil then
 		sink.enabled = true
@@ -653,7 +669,7 @@ end
 ---
 --- @param name string
 function LibLog:DisableSink(name)
-	local sink = LibLog.sinks[name]
+	local sink = self.sinks[name]
 
 	if sink ~= nil then
 		sink.enabled = false
@@ -668,7 +684,7 @@ function LibLog:GetSinks(enabledOnly)
 	--- @type string[]
 	local result = {}
 
-	for name, sink in pairs(LibLog.sinks) do
+	for name, sink in pairs(self.sinks) do
 		if not enabledOnly or (enabledOnly and sink.enabled) then
 			table.insert(result, name)
 		end
@@ -687,18 +703,11 @@ function LibLog:Embed(target)
 		target[k] = v
 	end
 
-	LibLog.embeds[target] = true
+	self.embeds[target] = true
 
 	return target
 end
 
---- Log a message to the console.
----
---- Any log level other than `FATAL` will be printed to the standard output, a log level of `FATAL` will additionally also be submitted to the error handler,
---- and halt execution of the current code path.
----
---- This function returns an `unknown` value to allow for `return MyAddon:LogFatal(...)` to immediately exit the running function when required.
----
 --- @private
 --- @param addon? string The name of the addon.
 --- @param level LibLog-1.0.LogLevel The log level to log with.
@@ -706,8 +715,8 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function LibLog:Log(addon, level, template, ...)
-	local isAllowed = IsLogAllowed(addon, level)
-	local isFatal = level == LibLog.LogLevel.FATAL
+	local isAllowed = IsLogLevelEnabled(addon, level)
+	local isFatal = level == self.LogLevel.FATAL
 
 	if not isAllowed and not isFatal then
 		return nil
@@ -727,11 +736,11 @@ function LibLog:Log(addon, level, template, ...)
 	if isAllowed then
 		local now = time()
 
-		if now ~= currentTime then
-			currentTime = now
-			currentSequenceId = 1
+		if now ~= self.currentTime then
+			self.currentTime = now
+			self.currentSequenceId = 1
 		else
-			currentSequenceId = currentSequenceId + 1
+			self.currentSequenceId = self.currentSequenceId + 1
 		end
 
 		--- @type LibLog-1.0.LogMessage
@@ -739,14 +748,14 @@ function LibLog:Log(addon, level, template, ...)
 			message = parsedMessage,
 			addon = addon,
 			level = level,
-			time = currentTime,
-			sequenceId = currentSequenceId,
+			time = self.currentTime,
+			sequenceId = self.currentSequenceId,
 			properties = PopulateMessageProperties(addon, message, values)
 		}
 
 		ChatFrameSink(result)
 
-		for _, sink in pairs(LibLog.sinks) do
+		for _, sink in pairs(self.sinks) do
 			if sink.enabled then
 				xpcall(sink.callback, ErrorHandler, result)
 			end
@@ -763,15 +772,14 @@ function LibLog:Log(addon, level, template, ...)
 	return nil
 end
 
---- Run a test suite, showcasing all functionality.
----
 --- @private
 function LibLog:TestSuite()
+	--- @type LibLog-1.0.Logger
 	local Addon = LibLog:Embed({
 		name = "TestSuite"
 	})
 
-    Addon:SetLogLevel(LibLog.LogLevel.INFO)
+    Addon:SetLogLevel(self.LogLevel.INFO)
     Addon:LogVerbose("HIDDEN: Verbose")
     Addon:LogDebug("HIDDEN: Debug")
     Addon:LogInfo("VISIBLE: Info")
@@ -797,8 +805,21 @@ function LibLog:TestSuite()
 		return "0.01ms", GetTime()
 	end)
 
-	LibLog.embeds[Addon] = nil
-	LibLog.levels[Addon.name] = nil
+	Addon:WithLogContext({additional = "context", some = 1, more = true, context = { 1, 3, 5 }}, function()
+		Addon:LogInfo("Using WithLogContext")
+
+		Addon:LogInfo("Using WithLogContext and specifying more arguments: {player}", "Arthas")
+
+		Addon:LogInfo("Using WithContext and overriding properties: {some}", "overriden")
+	end)
+
+	Addon:PushLogProperty("additional", "values")
+	Addon:PushLogProperty("are", { "c", "o", "o", "l" })
+	Addon:LogInfo("Using PushLogProperty")
+	Addon:PopLogProperty("additional", "are")
+
+	self.embeds[Addon] = nil
+	self.levels[Addon.name] = nil
 end
 
 for target in pairs(LibLog.embeds) do

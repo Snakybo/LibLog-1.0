@@ -51,7 +51,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 11)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 12)
 if LibLog == nil then
 	return
 end
@@ -79,7 +79,7 @@ LibLog.labels = {
 LibLog.configKey = "logLevel"
 
 --- @private
---- @type table<table, boolean>
+--- @type table<LibLog-1.0.Logger, boolean>
 LibLog.embeds = LibLog.embeds or {}
 
 --- @private
@@ -89,10 +89,6 @@ LibLog.levels = LibLog.levels or {}
 --- @private
 --- @type table<string, LibLog-1.0.SinkConfiguration>
 LibLog.sinks = LibLog.sinks or {}
-
---- @private
---- @type table<string, table<string, LibLog-1.0.Property>>
-LibLog.properties = LibLog.properties or {}
 
 --- @private
 LibLog.currentTime = LibLog.currentTime or 0
@@ -121,6 +117,7 @@ ChatFrameSink.COLOR_SCHEME = {
 
 --- @class LibLog-1.0.Logger
 --- @field public name? string The name of the addon logs will be attributed to.
+--- @field public logProperties? table<string, LibLog-1.0.Property>
 local Logger = {}
 
 local L = {
@@ -318,21 +315,16 @@ local function GetValues(...)
 	return 0, AcquireCachedTable()
 end
 
---- @param addon? string
+--- @param logger LibLog-1.0.Logger
 --- @param template LibLog-1.0.MessageTemplate
 --- @param values unknown[]
 --- @return table<string, unknown>
-local function PopulateMessageProperties(addon, template, values)
-	if addon == nil then
-		return {}
-	end
-
+local function PopulateMessageProperties(logger, template, values)
 	--- @type table<string, unknown>
 	local result = {}
 
-	local global = LibLog.properties[addon]
-	if global ~= nil then
-		for _, v in pairs(global) do
+	if logger.logProperties ~= nil then
+		for _, v in pairs(logger.logProperties) do
 			if v.isCallback then
 				local success, value = xpcall(v.value, ErrorHandler)
 
@@ -493,7 +485,7 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogVerbose(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.VERBOSE, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.VERBOSE, template, ...)
 end
 
 --- Log a DBG message. Debug logs should be used for developers to verify code paths, state changes, or event registration during active
@@ -505,7 +497,7 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogDebug(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.DEBUG, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.DEBUG, template, ...)
 end
 
 --- Log an INF message. Info logs shoud be used for general status updates and milestones. Generally when following the happy path of your code
@@ -517,7 +509,7 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogInfo(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.INFO, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.INFO, template, ...)
 end
 
 --- Log a WRN message. Warning logs should be the result of user error or other non-breaking issues. For example, optional settings are missing
@@ -530,7 +522,7 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogWarning(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.WARNING, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.WARNING, template, ...)
 end
 
 --- Log an ERR message. Error logs should indicate a high severity logic failure. For example, an API returns unexpected data. An error likely
@@ -542,7 +534,7 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogError(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.ERROR, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.ERROR, template, ...)
 end
 
 --- Log a FTL message, and submit the error to the error handler. Fatal logs are the highest severity, and should be used sparringly, when
@@ -556,18 +548,15 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function Logger:LogFatal(template, ...)
-	return LibLog:Log(self.name, LibLog.LogLevel.FATAL, template, ...)
+	return LibLog:Log(self, LibLog.LogLevel.FATAL, template, ...)
 end
 
---- Push a new property onto the stack, the value of this property will be present within the context of all further logs, until it is popped.
+--- Push a new property onto the stack, the value of this property will be present within the context of all further logs coming from this logger, until it is
+--- popped.
 ---
 --- @param name string
 --- @param value unknown|function
 function Logger:PushLogProperty(name, value)
-	if self.name == nil then
-		return
-	end
-
 	--- @type LibLog-1.0.Property
 	local property = {
 		name = name,
@@ -575,27 +564,22 @@ function Logger:PushLogProperty(name, value)
 		isCallback = type(value) == "function"
 	}
 
-	LibLog.properties[self.name] = LibLog.properties[self.name] or {}
-	LibLog.properties[self.name][name] = property
+	self.logProperties = self.logProperties or {}
+	self.logProperties[name] = property
 end
 
 --- Pop properties that were previously pushed.
 ---
 --- @param ... string
 function Logger:PopLogProperty(...)
-	if self.name == nil then
-		return
-	end
-
-	local properties = LibLog.properties[self.name]
-	if properties == nil then
+	if self.logProperties == nil then
 		return
 	end
 
 	local n = select("#", ...)
 	for i = 1, n do
 		local name = select(i, ...)
-		properties[name] = nil
+		self.logProperties[name] = nil
 	end
 end
 
@@ -603,21 +587,62 @@ end
 --- error-prone.
 ---
 --- @param properties table<string, unknown>
---- @param closure fun()
+--- @param closure fun(logger: LibLog-1.0.Logger)
 function Logger:WithLogContext(properties, closure)
-	for k, v in pairs(properties) do
-		self:PushLogProperty(k, v)
-	end
+	local logger = self:ForLogContext(properties)
 
-	local ok, err = pcall(closure)
-
-	for k in pairs(properties) do
-		self:PopLogProperty(k)
-	end
+	local ok, err = pcall(closure, logger)
 
 	if not ok then
 		error(err, 2)
 	end
+end
+
+--- Create a new logger with the specified context. All logs produced by this logger will have additional properties added to them.
+---
+--- @param properties? table<string, unknown>
+--- @return LibLog-1.0.Logger
+function Logger:ForLogContext(properties)
+	--- @type table<string, LibLog-1.0.Property>
+	local props
+
+	if properties ~= nil then
+		props = {}
+
+		for k, v in pairs(properties) do
+			--- @type LibLog-1.0.Property
+			local property = {
+				name = k,
+				value = v,
+				isCallback = type(v) == "function"
+			}
+
+			props[k] = property
+		end
+	else
+		props = DeepCopy(self.logProperties) or {}
+	end
+
+	if self.logProperties ~= nil then
+		for k, v in pairs(self.logProperties) do
+			if props[k] == nil then
+				props[k] = v
+			end
+		end
+	end
+
+	local proxy = {
+		logProperties = props,
+		_parent = self
+	}
+
+	setmetatable(proxy, {
+		__index = function(tbl, key)
+			return tbl._parent[key]
+		end
+	})
+
+	return proxy
 end
 
 --- Check if the given log level is currently enabled.
@@ -794,13 +819,13 @@ function LibLog:GetFormat(template)
 end
 
 --- @private
---- @param addon? string The name of the addon.
+--- @param logger LibLog-1.0.Logger The source logger.
 --- @param level LibLog-1.0.LogLevel The log level to log with.
 --- @param template string The message template.
 --- @param ... any The values to log.
 --- @return unknown
-function LibLog:Log(addon, level, template, ...)
-	local isAllowed = IsLogLevelEnabled(addon, level)
+function LibLog:Log(logger, level, template, ...)
+	local isAllowed = IsLogLevelEnabled(logger.name, level)
 	local isFatal = level == self.LogLevel.FATAL
 
 	if not isAllowed and not isFatal then
@@ -825,11 +850,11 @@ function LibLog:Log(addon, level, template, ...)
 		local result = {
 			message = message,
 			template = template,
-			addon = addon,
+			addon = logger.name,
 			level = level,
 			time = self.currentTime,
 			sequenceId = self.currentSequenceId,
-			properties = PopulateMessageProperties(addon, templateObj, values)
+			properties = PopulateMessageProperties(logger, templateObj, values)
 		}
 
 		for _, sink in pairs(self.sinks) do
@@ -890,13 +915,34 @@ function LibLog:TestSuite()
 		return "0.01ms", GetTime()
 	end)
 
-	Addon:WithLogContext({additional = "context", some = 1, more = true, context = { 1, 3, 5 }}, function()
-		Addon:LogInfo("Using WithLogContext")
+	Addon:PushLogProperty("preContext", "pushed before starting the context")
+	Addon:WithLogContext({additional = "context", some = 1, more = true, context = { 1, 3, 5 }}, function(logger)
+		logger:LogInfo("Using WithLogContext")
 
-		Addon:LogInfo("Using WithLogContext and specifying more arguments: {player}", "Arthas")
+		logger:LogInfo("Using WithLogContext and specifying more arguments: {player}", "Arthas")
 
-		Addon:LogInfo("Using WithContext and overriding properties: {some}", "overriden")
+		logger:LogInfo("Using WithContext and overriding properties: {some}", "overriden")
 	end)
+	Addon:PopLogProperty("preContext")
+
+	local logger = Addon:ForLogContext({additional = "context", some = 1, more = true, context = { 1, 3, 5 }})
+	logger:LogInfo("Using ForLogContext")
+	logger:LogInfo("Using ForLogContext and specifying more arguments: {player}", "Arthas")
+	logger:LogInfo("Using ForLogContext and overriding properties: {some}", "overriden")
+	logger:PushLogProperty("pushedLater", "woo")
+	logger:LogInfo("Using ForLogContext, with additional properties pushed separately")
+
+	Addon:PushLogProperty("pushed1", 1)
+	logger = Addon:ForLogContext()
+	logger:PushLogProperty("pushed2", 2)
+	Addon:PopLogProperty("pushed1")
+	logger:LogInfo("Using ForContext, with an additional base property and a self-owned property")
+
+	Addon:PushLogProperty("pushed1", 1)
+	logger = Addon:ForLogContext()
+	logger:PopLogProperty("pushed1")
+	logger:LogInfo("Using ForContext, with a popped property")
+	Addon:LogInfo("After popping an extra property within ForContext")
 
 	Addon:PushLogProperty("additional", "values")
 	Addon:PushLogProperty("are", { "c", "o", "o", "l" })

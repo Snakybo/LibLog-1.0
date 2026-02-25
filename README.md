@@ -225,13 +225,20 @@ MyAddon:PopLogProperty("extra", "anotherProperty")
 You can also use closures to automatically manage pushing and popping properties:
 
 ```lua
-MyAddon:WithLogContext({ extra = 41, anotherProperty = function() return UnitHealth("player") end }, function()
-  MyAddon:LogInfo("This log will have additional properties")
+MyAddon:WithLogContext({ extra = 41, anotherProperty = function() return UnitHealth("player") end }, function(logger)
+  logger:LogInfo("This log will have additional properties")
 
   -- <logic>
 
-  MyAddon:LogVerbose("This log will still have additional properties")
+  logger:LogVerbose("This log will still have additional properties")
 end)
+```
+
+Lastly, you can also create a new logger with additional properties:
+
+```lua
+local logger = MyAddon:ForLogContext({ extra = 41, anotherProperty = function() return UnitHealth("player") end })
+logger:LogInfo("This log will have additional properties")
 ```
 
 ## Custom sinks

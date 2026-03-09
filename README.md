@@ -294,6 +294,24 @@ LibLog:EnableSink("MyLogSink")
 LibLog:DisableSink("MyLogSink")
 ```
 
+## Modules
+
+LibLog-1.0 supports modularized code natively, with a focus on AceAddon-3.0 modules. When using these, you can simply embed LibLog-1.0 into your module. LibLog-1.0 will automatically capture the module name into a `module` field:
+
+```lua
+MyAddon:NewModule("MyModule", Prototype, "LibLog-1.0")
+```
+
+When not using AceAddon-3.0 but still wanting to use modules, defining them works similar to embedding the main addon:
+
+```lua
+MyModule = {}
+MyModule.name = "MyAddon" -- or MyAddon_MyModule
+MyModule.moduleName = "MyModule"
+
+LibStub("LibLog-1.0"):Embed(MyModule)
+```
+
 ### Available sinks
 
 * [LogSink: Table](https://github.com/Snakybo/LogSink-Table)

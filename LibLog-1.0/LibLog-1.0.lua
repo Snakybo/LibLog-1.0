@@ -51,7 +51,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 12)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 13)
 if LibLog == nil then
 	return
 end
@@ -116,7 +116,8 @@ ChatFrameSink.COLOR_SCHEME = {
 }
 
 --- @class LibLog-1.0.Logger
---- @field public name? string The name of the addon logs will be attributed to.
+--- @field public name? string
+--- @field public moduleName? string
 --- @field public logProperties? table<string, LibLog-1.0.Property>
 local Logger = {}
 
@@ -275,6 +276,16 @@ local function GetMessageTemplate(template)
 	templateCache[template] = result
 
 	return result
+end
+
+--- @param logger LibLog-1.0.Logger
+local function GetLoggerName(logger)
+	if logger.moduleName ~= nil and logger.name ~= nil then
+		local realName = string.gsub(logger.name, "_" .. logger.moduleName .. "$", "")
+		return realName, logger.moduleName
+	end
+
+	return logger.name
 end
 
 --- @param ... unknown
@@ -652,7 +663,8 @@ end
 --- @param level LibLog-1.0.LogLevel
 --- @return boolean
 function Logger:IsLogLevelEnabled(level)
-	if not IsLogLevelEnabled(self.name, level) then
+	local name = GetLoggerName(self)
+	if not IsLogLevelEnabled(name, level) then
 		return level >= LibLog.LogLevel.FATAL
 	end
 
@@ -663,18 +675,20 @@ end
 ---
 --- @param level? LibLog-1.0.LogLevel The log level to set.
 function Logger:SetLogLevel(level)
-	if self.name == nil then
+	local name = GetLoggerName(self)
+	if name == nil then
 		return
 	end
 
-	LibLog.levels[self.name] = level
+	LibLog.levels[name] = level
 end
 
 --- Set the log level using a configuration table.
 ---
 --- @param configTable table A configuration table to retrieve the current log level from, usually your saved variables.
 function Logger:SetLogLevelFromConfigTable(configTable)
-	if self.name == nil then
+	local name = GetLoggerName(self)
+	if name == nil then
 		return
 	end
 
@@ -689,7 +703,8 @@ end
 ---
 --- @return LibLog-1.0.LogLevel
 function Logger:GetLogLevel()
-	return LibLog.levels[self.name] or minLogLevel
+	local name = GetLoggerName(self)
+	return LibLog.levels[name] or minLogLevel
 end
 
 --- Create an AceGUI option table which can manipulate the log level.
@@ -825,7 +840,8 @@ end
 --- @param ... any The values to log.
 --- @return unknown
 function LibLog:Log(logger, level, template, ...)
-	local isAllowed = IsLogLevelEnabled(logger.name, level)
+	local name, module = GetLoggerName(logger)
+	local isAllowed = IsLogLevelEnabled(name, level)
 	local isFatal = level == self.LogLevel.FATAL
 
 	if not isAllowed and not isFatal then
@@ -850,7 +866,8 @@ function LibLog:Log(logger, level, template, ...)
 		local result = {
 			message = message,
 			template = template,
-			addon = logger.name,
+			addon = name,
+			module = module,
 			level = level,
 			time = self.currentTime,
 			sequenceId = self.currentSequenceId,

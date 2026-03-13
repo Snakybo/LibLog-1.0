@@ -9,7 +9,7 @@ There are several related addons available which can capture the output of LibLo
 MyAddon:LogInfo("My current health is {health}, and I have {mana} mana", UnitHealth("player"), UnitPower("player"))
 ```
 
-LibLog-1.0 uses a lite¹ version of [Message Templates](https://messagetemplates.org/), which is a DSL that standardizes formatted strings with named
+LibLog-1.0 uses [Message Templates](https://messagetemplates.org/), which is a DSL that standardizes formatted strings with named
 parameters. Instead of formatting variables directly into the text, LibLog-1.0 captures the value associated with the value.
 
 The above example will record two properties (`health`, and `mana`) in the log object, when inspecting the log object, they appear in a `properties` table,
@@ -28,8 +28,6 @@ alongside the timestamp, message, and log level.
 Note that even though LibLog-1.0 is built to work with structured logs, it will first and foremost still print human-readable text into the chat window.
 When no additional sink addons are installed, that's all it does. It still offers the full suite of features, they will just be mostly transparant, which is how
 99.9% of users will experience it.
-
-¹ Lite because it doesn't support the more advanced features such as `@`, `$`, and `:000`.
 
 ## Structured logging.. but why?
 
@@ -118,6 +116,15 @@ Level | Method | When to use
 1 | LogVerbose | High-frequency, noisy data that is rarely enabled outside of debugging.
 
 By default, the minimum log level is set to `Info`, meaning `Info` and higher levels are processed.
+
+### Formatting
+
+You can use standard Lua string formatting in your templates, for example:
+
+```lua
+MyAddon:LogInfo("Current progress {progress:.2f}", 0.124567890)
+-- Current progress 0.12
+```
 
 ### Configuration
 

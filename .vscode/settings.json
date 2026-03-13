@@ -18,5 +18,6 @@
 		"~\\.vscode\\extensions\\ketho.wow-api-0.22.3\\Annotations\\FrameXML"
 	],
 	"Lua.workspace.useGitIgnore": false,
-	"wowAPI.luals.defineKnownGlobals": false
+	"wowAPI.luals.defineKnownGlobals": false,
+	"Lua.type.weakUnionCheck": true
 }

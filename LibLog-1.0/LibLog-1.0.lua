@@ -42,8 +42,13 @@ end
 --- @field public enabled boolean
 
 --- @class LibLog-1.0.MessageTemplate
---- @field public format string
---- @field public properties string[]
+--- @field public format string A string containing % style placeholders such as %d, %.2f, etc. Can be used to format the message.
+--- @field public stringFormat string A string containing %s placeholders for each property. Can be used to format the message.
+--- @field public properties LibLog-1.0.MessageTemplateProperty[]
+
+--- @class LibLog-1.0.MessageTemplateProperty
+--- @field public name string The name of the property, which can be used to reference a field in the log message or log message properties.
+--- @field public format string The format of the property, such as %d, %.2f, %s, etc. Can be used to format the property value.
 
 --- @class LibLog-1.0.Property
 --- @field public name string
@@ -51,7 +56,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 13)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 14)
 if LibLog == nil then
 	return
 end
@@ -260,18 +265,27 @@ local function GetMessageTemplate(template)
 		return result
 	end
 
+	--- @type LibLog-1.0.MessageTemplate
 	result = {
-		--- @diagnostic disable-next-line: assign-type-mismatch
-		format = nil,
+		format = "",
+		stringFormat = "",
 		properties = {}
 	}
 
 	template = string.gsub(template, "%%", "%%%%")
 
-	result.format = string.gsub(template, "{(.-)}", function(key)
-		table.insert(result.properties, key)
-		return "%s"
+	result.format = string.gsub(template, "{(%w+):?(.-)}", function(key, format)
+		--- @type LibLog-1.0.MessageTemplateProperty
+		local item = {
+			name = key,
+			format = format ~= "" and ("%" .. format) or "%s"
+		}
+
+		table.insert(result.properties, item)
+		return item.format
 	end)
+
+	result.stringFormat = string.gsub(template, "{(.-)}", "%%s")
 
 	templateCache[template] = result
 
@@ -349,7 +363,7 @@ local function PopulateMessageProperties(logger, template, values)
 	end
 
 	for i = 1, #template.properties do
-		result[template.properties[i]] = values[i]
+		result[template.properties[i].name] = values[i]
 	end
 
 	return result
@@ -406,24 +420,25 @@ end
 
 --- @param message LibLog-1.0.LogMessage
 function ChatFrameSink:CreateMessage(message)
-	local format, properties = LibLog:GetFormat(message.template)
+	local template = LibLog:GetFormat(message.template)
 	local values = AcquireCachedTable()
 
-	for i = 1, #properties do
-		local key = properties[i]
-		values[i] = self:Serialize(message.properties[key])
+	for i = 1, #template.properties do
+		local property = template.properties[i]
+		values[i] = self:Serialize(message, property)
 	end
 
-	local result = string.format(format, unpack(values))
+	local result = string.format(template.stringFormat, unpack(values))
 	ReleaseCachedTable(values)
 
 	return result
 end
 
 --- @private
---- @param value unknown
+--- @param message LibLog-1.0.LogMessage
+--- @param property LibLog-1.0.MessageTemplateProperty
 --- @return string
-function ChatFrameSink:Serialize(value)
+function ChatFrameSink:Serialize(message, property)
 	local TABLE_COLOR = self.COLOR_SCHEME["table"]
 	local TABLE_KEY_COLOR = self.COLOR_SCHEME["tableKey"]
 	local STRING_COLOR = self.COLOR_SCHEME["string"]
@@ -468,11 +483,11 @@ function ChatFrameSink:Serialize(value)
 			end
 		end
 
-		return self:Colorize(tostring(current), self.COLOR_SCHEME[color] or STRING_COLOR)
+		return self:Colorize(string.format(property.format, current), self.COLOR_SCHEME[color] or STRING_COLOR)
 	end
 
 	local visited = AcquireCachedTable()
-	local result = Serialize(value, visited)
+	local result = Serialize(message[property.name] or message.properties[property.name], visited)
 
 	ReleaseCachedTable(visited)
 
@@ -826,11 +841,9 @@ function LibLog:Embed(target)
 end
 
 --- @param template string
---- @return string format
---- @return string[] properties
+--- @return LibLog-1.0.MessageTemplate
 function LibLog:GetFormat(template)
-	local templateObj = GetMessageTemplate(template)
-	return templateObj.format, templateObj.properties
+	return GetMessageTemplate(template)
 end
 
 --- @private

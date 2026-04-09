@@ -49,6 +49,7 @@ end
 --- @class LibLog-1.0.MessageTemplateProperty
 --- @field public name string The name of the property, which can be used to reference a field in the log message or log message properties.
 --- @field public format string The format of the property, such as %d, %.2f, %s, etc. Can be used to format the property value.
+--- @field public replacer? string The name of the replacement table to use when formatting this property, which can be used to convert enum values into human-readable strings.
 
 --- @class LibLog-1.0.Property
 --- @field public name string
@@ -56,7 +57,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 15)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 16)
 if LibLog == nil then
 	return
 end
@@ -90,6 +91,10 @@ LibLog.embeds = LibLog.embeds or {}
 --- @private
 --- @type table<string, LibLog-1.0.LogLevel>
 LibLog.levels = LibLog.levels or {}
+
+--- @private
+--- @type table<unknown, string>
+LibLog.enumNames = {}
 
 --- @private
 --- @type table<string, LibLog-1.0.SinkConfiguration>
@@ -202,15 +207,32 @@ local function DeepCopy(value, seen)
 	return result
 end
 
+--- @param logger LibLog-1.0.Logger
+local function GetLoggerName(logger)
+	if logger.moduleName ~= nil and logger.name ~= nil then
+		local realName = string.gsub(logger.name, "_" .. logger.moduleName .. "$", "")
+		return realName, logger.moduleName
+	end
+
+	return logger.name
+end
+
+local function GetReplacerName(logger, id)
+	local name = GetLoggerName(logger)
+	return name .. "_" .. id
+end
+
+--- @param logger LibLog-1.0.Logger
 --- @param template LibLog-1.0.MessageTemplate
 --- @param values unknown[]
 --- @return string
-local function CreateMessage(template, values)
+local function CreateMessage(logger, template, values)
+	--- @param property LibLog-1.0.MessageTemplateProperty
 	--- @param current unknown
 	--- @param visited table<table, boolean>
 	--- @param escape? boolean
 	--- @return string
-	local function Serialize(current, visited, escape)
+	local function Serialize(property, current, visited, escape)
 		if type(current) == "table" then
 			if visited[current] then
 				return "<circular reference>"
@@ -224,7 +246,7 @@ local function CreateMessage(template, values)
 			for k, v in pairs(current) do
 				table.insert(result, type(k) == "string" and k or "[" .. tostring(k) .. "]")
 				table.insert(result, "=")
-				table.insert(result, Serialize(v, visited, true) .. ",")
+				table.insert(result, Serialize(property, v, visited, true) .. ",")
 			end
 
 			visited[current] = false
@@ -239,6 +261,18 @@ local function CreateMessage(template, values)
 			return string.format("%q", current)
 		end
 
+		if property.replacer ~= nil then
+			local id = GetReplacerName(logger, property.replacer)
+
+			if LibLog.enumNames[id] ~= nil then
+				local enumValue = LibLog.enumNames[id][current]
+
+				if enumValue ~= nil then
+					return enumValue
+				end
+			end
+		end
+
 		return tostring(current)
 	end
 
@@ -246,7 +280,7 @@ local function CreateMessage(template, values)
 	local visited = AcquireCachedTable()
 
 	for i = 1, #template.properties do
-		result[i] = Serialize(values[i], visited)
+		result[i] = Serialize(template.properties[i], values[i], visited)
 	end
 
 	local message = string.format(template.format, unpack(result))
@@ -274,11 +308,12 @@ local function GetMessageTemplate(template)
 
 	template = string.gsub(template, "%%", "%%%%")
 
-	result.format = string.gsub(template, "{(%w+):?(.-)}", function(key, format)
+	result.format = string.gsub(template, "{(%w+)#?(%w*):?(.-)}", function(key, replacer, format)
 		--- @type LibLog-1.0.MessageTemplateProperty
 		local item = {
 			name = key,
-			format = format ~= "" and ("%" .. format) or "%s"
+			format = format ~= "" and ("%" .. format) or "%s",
+			replacer = replacer ~= "" and replacer or nil
 		}
 
 		table.insert(result.properties, item)
@@ -290,16 +325,6 @@ local function GetMessageTemplate(template)
 	templateCache[template] = result
 
 	return result
-end
-
---- @param logger LibLog-1.0.Logger
-local function GetLoggerName(logger)
-	if logger.moduleName ~= nil and logger.name ~= nil then
-		local realName = string.gsub(logger.name, "_" .. logger.moduleName .. "$", "")
-		return realName, logger.moduleName
-	end
-
-	return logger.name
 end
 
 --- @param ... unknown
@@ -345,6 +370,8 @@ end
 --- @param values unknown[]
 --- @return table<string, unknown>
 local function PopulateMessageProperties(logger, template, values)
+	local name = GetLoggerName(logger)
+
 	--- @type table<string, unknown>
 	local result = {}
 
@@ -363,7 +390,20 @@ local function PopulateMessageProperties(logger, template, values)
 	end
 
 	for i = 1, #template.properties do
-		result[template.properties[i].name] = values[i]
+		local property = template.properties[i]
+		result[property.name] = values[i]
+
+		if property.replacer ~= nil then
+			local id = GetReplacerName(logger, property.replacer)
+
+			if LibLog.enumNames[id] ~= nil then
+				local enumValue = LibLog.enumNames[id][values[i]]
+
+				if enumValue ~= nil then
+					result[property.name] = enumValue
+				end
+			end
+		end
 	end
 
 	return result
@@ -673,14 +713,32 @@ function Logger:ForLogContext(properties)
 	return proxy
 end
 
+--- Add an enum-like type to the logger, which can be referenced within log templates using `{propertyName#EnumName}`.
+---
+--- @param id string
+--- @param enum table<string, unknown>
+function Logger:AddLogEnum(id, enum)
+	id = GetReplacerName(self, id)
+
+	LibLog.enumNames[id] = {}
+	for k, v in pairs(enum) do
+		LibLog.enumNames[id][v] = k
+	end
+end
+
 --- Check if the given log level is currently enabled.
 ---
 --- This will always return `true` for the FTL log level.
 ---
---- @param level LibLog-1.0.LogLevel
+--- @param level LibLog-1.0.LogLevel|string
 --- @return boolean
 function Logger:IsLogLevelEnabled(level)
 	local name = GetLoggerName(self)
+
+	if type(level) == "string" then
+		level = LibLog.LogLevel[level:upper()]
+	end
+
 	if not IsLogLevelEnabled(name, level) then
 		return level >= LibLog.LogLevel.FATAL
 	end
@@ -690,11 +748,15 @@ end
 
 --- Set the minimum log level, any logs with a level lower than the given value will be ignored.
 ---
---- @param level? LibLog-1.0.LogLevel The log level to set.
+--- @param level? LibLog-1.0.LogLevel|string The log level to set.
 function Logger:SetLogLevel(level)
 	local name = GetLoggerName(self)
 	if name == nil then
 		return
+	end
+
+	if type(level) == "string" then
+		level = LibLog.LogLevel[level:upper()]
 	end
 
 	LibLog.levels[name] = level
@@ -865,7 +927,7 @@ function LibLog:Log(logger, level, template, ...)
 
 	local templateObj = GetMessageTemplate(template)
 	local _, values = GetValues(...)
-	local message = CreateMessage(templateObj, values)
+	local message = CreateMessage(logger, templateObj, values)
 
 	if isAllowed then
 		local now = time()
@@ -980,6 +1042,13 @@ function LibLog:TestSuite()
 	Addon:PushLogProperty("are", { "c", "o", "o", "l" })
 	Addon:LogInfo("Using PushLogProperty")
 	Addon:PopLogProperty("additional", "are")
+
+	Addon:AddLogEnum("TestEnum", {
+		KEY1 = 1,
+		KEY2 = 2,
+		KEY3 = 3
+	})
+	Addon:LogInfo("Using enum values: {enumValue#TestEnum}", 2)
 
 	self.embeds[Addon] = nil
 	self.levels[Addon.name] = nil

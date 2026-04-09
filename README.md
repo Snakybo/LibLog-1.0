@@ -248,6 +248,28 @@ local logger = MyAddon:ForLogContext({ extra = 41, anotherProperty = function() 
 logger:LogInfo("This log will have additional properties")
 ```
 
+### Enum formattting
+
+When creating enum-like tables, often the value is not human-readable, for example:
+
+```lua
+--- @enum Scope
+local Scope = {
+  PROFILE = 1,
+  GLOBAL = 2,
+  VIRTUAL = 3
+}
+```
+
+When adding the value of `Scope.PROFILE` to a log, it will simply print `1`, which is not very useful. LibLog-1.0 contains funtionality to register enum tables, and automatically format them in log messages.
+
+```lua
+MyAddon:AddLogEnum("Scope", Scope)
+MyAddon:LogInfo("Current scope is {scope#Scope}", Scope.PROFILE)
+```
+
+This is a two-part process, first the enum table must be registered with `AddLogEnum`, then the enum value can be formatted in log messages by appending `#EnumName` to the property name. If the value of the property is not found in the enum table, or if the enum table is not registered, it will simply capture the raw value.-
+
 ## Custom sinks
 
 And finally, the primary reason LibLog-1.0 exists, custom sinks to process log objects.

@@ -56,7 +56,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 14)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 15)
 if LibLog == nil then
 	return
 end
@@ -481,6 +481,8 @@ function ChatFrameSink:Serialize(message, property)
 			if C_EventUtils.IsEventValid(current) then
 				color = "event"
 			end
+		else
+			current = tostring(current)
 		end
 
 		return self:Colorize(string.format(property.format, current), self.COLOR_SCHEME[color] or STRING_COLOR)

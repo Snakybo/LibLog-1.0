@@ -57,7 +57,7 @@ end
 --- @field public isCallback boolean
 
 --- @class LibLog-1.0
-local LibLog = LibStub:NewLibrary("LibLog-1.0", 16)
+local LibLog = LibStub:NewLibrary("LibLog-1.0", 17)
 if LibLog == nil then
 	return
 end
@@ -910,6 +910,23 @@ function LibLog:GetFormat(template)
 	return GetMessageTemplate(template)
 end
 
+--- Get the next sequence ID for the current time and advance the internal sequence counter.
+---
+--- @return number time
+--- @return integer sequenceId
+function LibLog:GetNextSequenceId()
+	local now = time()
+
+	if now ~= self.currentTime then
+		self.currentTime = now
+		self.currentSequenceId = 1
+	else
+		self.currentSequenceId = self.currentSequenceId + 1
+	end
+
+	return self.currentTime, self.currentSequenceId
+end
+
 --- @private
 --- @param logger LibLog-1.0.Logger The source logger.
 --- @param level LibLog-1.0.LogLevel The log level to log with.
@@ -930,14 +947,7 @@ function LibLog:Log(logger, level, template, ...)
 	local message = CreateMessage(logger, templateObj, values)
 
 	if isAllowed then
-		local now = time()
-
-		if now ~= self.currentTime then
-			self.currentTime = now
-			self.currentSequenceId = 1
-		else
-			self.currentSequenceId = self.currentSequenceId + 1
-		end
+		local time, sequenceId = self:GetNextSequenceId()
 
 		--- @type LibLog-1.0.LogMessage
 		local result = {
@@ -946,8 +956,8 @@ function LibLog:Log(logger, level, template, ...)
 			addon = name,
 			module = module,
 			level = level,
-			time = self.currentTime,
-			sequenceId = self.currentSequenceId,
+			time = time,
+			sequenceId = sequenceId,
 			properties = PopulateMessageProperties(logger, templateObj, values)
 		}
 
